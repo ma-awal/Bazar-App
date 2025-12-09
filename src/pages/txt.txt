@@ -1,0 +1,18 @@
+// --- CONFIGURATION ---
+const MEMBERS_CONFIG = [
+  { id: 1, name: 'Amit', startDay: 1, endDay: 6 },
+  { id: 2, name: 'Tofayel', startDay: 7, endDay: 12 },
+  { id: 3, name: 'Abid', startDay: 13, endDay: 18 },
+  { id: 4, name: 'Awal', startDay: 19, endDay: 24 },
+  { id: 5, name: 'Guest', startDay: 25, endDay: 30 },
+];
+
+// 🔴 গুরত্বপূর্ণ: এখানে আপনার Firebase এর আসল ইমেইলগুলো বসান
+// যেই ইমেইল যার আইডির সাথে মিলবে, সে শুধু তার ডাটাই এডিট করতে পারবে
+const MEMBER_EMAILS = {
+  'amit330@d.com': 1,  // Example Email -> ID 1 (Rahim)
+  'tofayel330@d.com': 2,  // Example Email -> ID 2 (Karim)
+  'abid330@d.com': 3,
+  'awal330@d.com': 4,
+  'jabbar@d.com': 5
+};
