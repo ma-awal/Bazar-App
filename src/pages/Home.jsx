@@ -2,10 +2,16 @@
 import { db, auth } from '../firebase'; 
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, orderBy } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { FaHome, FaWallet, FaTrash, FaPlus, FaEdit, FaChevronDown, FaChevronUp, FaTimes, FaUserClock, FaLock, FaSignOutAlt, FaHistory, FaListAlt } from 'react-icons/fa';
+import { FaHome, FaWallet, FaTrash, FaPlus, FaEdit, FaChevronDown, FaChevronUp, FaTimes, FaUserClock, FaLock, FaSignOutAlt, FaHistory, FaListAlt, FaUserShield, FaBolt, FaExchangeAlt } from 'react-icons/fa';
 import { BiDish } from "react-icons/bi";
 
- 
+// ==========================================
+// ⚙️ CLIENT CONFIGURATION SECTION (EDIT HERE)
+// ==========================================
+// বিক্রির সময় ক্লায়েন্ট শুধু এই অংশটুকু এডিট করবে
+const APP_NAME = "Smart Mess Manager";
+const CURRENCY = "৳";
+
 // --- CONFIGURATION ---
 const MEMBERS_CONFIG = [
   { id: 1, name: 'Amit', startDay: 1, endDay: 6 },
@@ -22,11 +28,9 @@ const MEMBER_EMAILS = {
   'tofayel330@d.com': 2,  // Example Email -> ID 2 (Karim)
   'abid330@d.com': 3,
   'awal330@d.com': 4,
-  'gurest330@d.com': 5
+  'jabbar@d.com': 5
 };
-
-
-
+// ==========================================
 
 const Home = () => {
   // --- AUTH & USER STATE ---
@@ -43,21 +47,20 @@ const Home = () => {
   const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
   const currentDay = today.getDate();
 
-  // --- IDENTIFY CURRENT MEMBER & SHIFT STATUS ---
+  // --- IDENTIFY CURRENT MEMBER ---
   const loggedInMemberId = useMemo(() => {
     return user && MEMBER_EMAILS[user.email] ? MEMBER_EMAILS[user.email] : null;
   }, [user]);
 
-  const myShiftInfo = useMemo(() => {
-    if (!loggedInMemberId) return null;
-    return MEMBERS_CONFIG.find(m => m.id === loggedInMemberId);
+  const loggedInMemberInfo = useMemo(() => {
+    return loggedInMemberId ? MEMBERS_CONFIG.find(m => m.id === loggedInMemberId) : null;
   }, [loggedInMemberId]);
 
-  // আজকের দিনে আমার শিফট আছে কিনা চেক করা (Strict Access)
+  // Check if today is my shift
   const isMyShiftToday = useMemo(() => {
-    if (!myShiftInfo) return false;
-    return currentDay >= myShiftInfo.startDay && currentDay <= myShiftInfo.endDay;
-  }, [currentDay, myShiftInfo]);
+    if (!loggedInMemberInfo) return false;
+    return currentDay >= loggedInMemberInfo.startDay && currentDay <= loggedInMemberInfo.endDay;
+  }, [currentDay, loggedInMemberInfo]);
 
   // --- DATA FETCHING ---
   const [bazaarList, setBazaarList] = useState([]);
@@ -74,12 +77,10 @@ const Home = () => {
 
   useEffect(() => {
     if (!user) return;
-
     const q = query(collection(db, "bazaar"), orderBy("timestamp", "desc"));
     const unsubscribeBazaar = onSnapshot(q, (snapshot) => {
       setBazaarList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
-
     const unsubscribeMeals = onSnapshot(doc(db, "settings", "mealSheet"), (docSnap) => {
       if (docSnap.exists()) {
         setMealSheet(docSnap.data().sheet);
@@ -94,7 +95,6 @@ const Home = () => {
       }
       setDataLoading(false);
     });
-
     return () => { unsubscribeBazaar(); unsubscribeMeals(); };
   }, [user, daysInMonth]);
 
@@ -103,7 +103,12 @@ const Home = () => {
   const [currentItems, setCurrentItems] = useState([{ name: '', price: '' }]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [expandedDateId, setExpandedDateId] = useState(null); // For History Tab Accordion
+  const [expandedDateId, setExpandedDateId] = useState(null);
+  
+  // 🔥 New Features State
+  const [expenseType, setExpenseType] = useState('Regular'); // 'Regular', 'Extra'
+  const [isProxy, setIsProxy] = useState(false); // Proxy Toggle
+  const [proxyForId, setProxyForId] = useState(''); // Car hoye bazar korche
 
   // --- ACTIONS ---
   const handleLogin = async (e) => {
@@ -111,7 +116,6 @@ const Home = () => {
     try { await signInWithEmailAndPassword(auth, loginEmail, loginPass); setLoginError(''); } 
     catch (error) { setLoginError('Invalid Credentials'); }
   };
-
   const handleLogout = async () => await signOut(auth);
 
   const addItemField = () => setCurrentItems([...currentItems, { name: '', price: '' }]);
@@ -120,27 +124,56 @@ const Home = () => {
   };
   const removeItemField = (idx) => setCurrentItems(currentItems.filter((_, i) => i !== idx));
   
+  const openAddModal = () => {
+      setShowAddModal(true);
+      setEditingId(null);
+      setCurrentItems([{ name: '', price: '' }]);
+      setExpenseType('Regular');
+      setIsProxy(!isMyShiftToday); // If not my shift, auto suggest proxy
+      setProxyForId(isMyShiftToday ? loggedInMemberId : '');
+  };
+
   const handleEdit = (entry) => {
+    if(entry.createdBy !== user.email) { alert("Access Denied"); return; }
     setInputDate(entry.date); setCurrentItems(entry.items); setEditingId(entry.id);
-    setShowAddModal(true); window.scrollTo({ top: 0, behavior: 'smooth' });
+    setExpenseType(entry.type || 'Regular');
+    setIsProxy(entry.isProxy || false);
+    setProxyForId(entry.originalShopperId || entry.shopperId);
+    setShowAddModal(true); 
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const submitBazaar = async (e) => {
     e.preventDefault();
-    // Security Check: তারিখ শিফটের বাইরে হলে আটকাও
-    if (!isMyShiftToday) {
-       alert("Error: You can only add expenses during your shift dates!");
-       return;
+    
+    // Proxy Validation
+    let finalOriginalShopperId = loggedInMemberId;
+    
+    if (isProxy) {
+        if(!proxyForId) { alert("Please select who you are shopping for."); return; }
+        finalOriginalShopperId = parseInt(proxyForId);
+    } else {
+        // If not proxy, strict shift check logic
+        if (!isMyShiftToday && expenseType === 'Regular') {
+             if(!window.confirm("It's not your shift today. Are you sure this is a Regular Bazaar for YOURSELF? If you are shopping for someone else, use Proxy Mode.")) {
+                 return;
+             }
+        }
     }
+
     const validItems = currentItems.filter(i => i.name && i.price);
     if (!inputDate || validItems.length === 0) return;
     
     const subTotal = validItems.reduce((acc, curr) => acc + parseFloat(curr.price), 0);
+    
     const payload = { 
       date: inputDate, 
-      shopperId: loggedInMemberId, 
+      shopperId: loggedInMemberId, // Who spent the money (Balance pabe)
+      originalShopperId: finalOriginalShopperId, // Whose shift it was (Display te nam thakbe)
       items: validItems, 
       subTotal, 
+      type: expenseType, // Regular or Extra
+      isProxy: isProxy,
       createdBy: user.email, 
       timestamp: editingId ? bazaarList.find(b => b.id === editingId).timestamp : Date.now() 
     };
@@ -148,11 +181,12 @@ const Home = () => {
     try {
       if (editingId) await updateDoc(doc(db, "bazaar", editingId), payload);
       else await addDoc(collection(db, "bazaar"), payload);
-      setEditingId(null); setCurrentItems([{ name: '', price: '' }]); setShowAddModal(false);
+      setShowAddModal(false);
     } catch (error) { alert("Failed to save."); }
   };
 
   const deleteBazaar = async (id) => { if(window.confirm('Delete entry?')) await deleteDoc(doc(db, "bazaar", id)); };
+  
   const toggleMeal = async (dIdx, mId) => {
     const newSheet = [...mealSheet]; newSheet[dIdx].status[mId] = !newSheet[dIdx].status[mId];
     await updateDoc(doc(db, "settings", "mealSheet"), { sheet: newSheet });
@@ -162,13 +196,17 @@ const Home = () => {
   const stats = useMemo(() => {
     let totalBazaarCost = 0;
     const memberStats = MEMBERS_CONFIG.map(m => ({ ...m, totalMeals: 0, totalCost: 0 }));
+    
     bazaarList.forEach(e => {
       totalBazaarCost += e.subTotal;
-      const s = memberStats.find(m => m.id === e.shopperId);
-      if (s) s.totalCost += e.subTotal;
+      // Money spent credit goes to the ACTUAL shopper (shopperId), not the proxy target
+      const spender = memberStats.find(m => m.id === e.shopperId);
+      if (spender) spender.totalCost += e.subTotal;
     });
+
     let grandTotalMeals = 0;
     mealSheet.forEach(d => { MEMBERS_CONFIG.forEach(m => { if (d.status && d.status[m.id]) { memberStats.find(me => me.id === m.id).totalMeals += 1; grandTotalMeals += 1; } }); });
+    
     const mealRate = grandTotalMeals > 0 ? (totalBazaarCost / grandTotalMeals) : 0;
     const finalReport = memberStats.map(m => ({ ...m, mealCost: m.totalMeals * mealRate, balance: m.totalCost - (m.totalMeals * mealRate) }));
     return { totalBazaarCost, mealRate, finalReport };
@@ -180,9 +218,9 @@ const Home = () => {
   if (!user) return (
     <div className="vh-100 d-flex justify-content-center align-items-center bg-light px-3">
       <div className="card border-0 shadow-lg p-4" style={{maxWidth:'400px', width:'100%', borderRadius:'20px'}}>
-        <div className="text-center mb-4"><div className="bg-primary bg-opacity-10 p-3 rounded-circle d-inline-block mb-3 text-primary"><FaLock size={30} /></div><h4 className="fw-bold">Mess Login</h4></div>
+        <div className="text-center mb-4"><div className="bg-primary bg-opacity-10 p-3 rounded-circle d-inline-block mb-3 text-primary"><FaLock size={30} /></div><h4 className="fw-bold">{APP_NAME}</h4><p className="text-muted small">Member Access Only</p></div>
         {loginError && <div className="alert alert-danger py-2 small">{loginError}</div>}
-        <form onSubmit={handleLogin}><div className="mb-3"><input type="email" className="form-control modern-input py-3" placeholder="Email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} required /></div><div className="mb-4"><input type="password" className="form-control modern-input py-3" placeholder="Password" value={loginPass} onChange={e=>setLoginPass(e.target.value)} required /></div><button className="btn btn-primary w-100 py-3 rounded-pill fw-bold">Login</button></form>
+        <form onSubmit={handleLogin}><div className="mb-3"><input type="email" className="form-control modern-input py-3" placeholder="Email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} required /></div><div className="mb-4"><input type="password" className="form-control modern-input py-3" placeholder="Password" value={loginPass} onChange={e=>setLoginPass(e.target.value)} required /></div><button className="btn btn-primary w-100 py-3 rounded-pill fw-bold shadow-sm">Secure Login</button></form>
       </div>
     </div>
   );
@@ -197,7 +235,7 @@ const Home = () => {
       <div className="header-gradient">
         <div className="d-flex justify-content-between align-items-center container">
           <div>
-            <h6 className="mb-0 text-white-50 small text-uppercase" style={{letterSpacing:'1px'}}>Hello, {myShiftInfo?.name}</h6>
+            <h6 className="mb-0 text-white-50 small text-uppercase" style={{letterSpacing:'1px'}}>Welcome, {loggedInMemberInfo?.name}</h6>
             <h2 className="fw-bold mb-0">{currentMonthName}</h2>
           </div>
           <button onClick={handleLogout} className="btn btn-outline-light border-0 bg-white bg-opacity-10 rounded-circle p-2"><FaSignOutAlt size={20} /></button>
@@ -209,19 +247,26 @@ const Home = () => {
         {/* --- TAB 1: DASHBOARD --- */}
         {activeTab === 'dashboard' && (
           <div className="animate__animated animate__fadeIn">
-             {/* Stats */}
              <div className="row g-3 mb-4">
-               <div className="col-6"><div className="app-card p-3 text-center h-100"><small className="text-muted d-block mb-1">Total Spent</small><h3 className="text-primary fw-bold mb-0">৳{stats.totalBazaarCost}</h3></div></div>
-               <div className="col-6"><div className="app-card p-3 text-center h-100"><small className="text-muted d-block mb-1">Meal Rate</small><h3 className="text-success fw-bold mb-0">৳{stats.mealRate.toFixed(1)}</h3></div></div>
+               <div className="col-6"><div className="app-card p-3 text-center h-100"><small className="text-muted d-block mb-1">Total Expenses</small><h3 className="text-primary fw-bold mb-0">{CURRENCY}{stats.totalBazaarCost}</h3></div></div>
+               <div className="col-6"><div className="app-card p-3 text-center h-100"><small className="text-muted d-block mb-1">Meal Rate</small><h3 className="text-success fw-bold mb-0">{CURRENCY}{stats.mealRate.toFixed(1)}</h3></div></div>
              </div>
-             {/* Members Grid */}
-             <h6 className="text-muted ps-1 mb-3 small fw-bold">ALL MEMBERS</h6>
+             
+             {/* Current Shift Indicator */}
+             {!isMyShiftToday && (
+                 <div className="alert alert-warning border-0 shadow-sm d-flex align-items-center gap-2 small mb-4">
+                    <FaUserClock />
+                    <div>You are currently <strong>OFF-SHIFT</strong>. Use proxy mode if buying for others.</div>
+                 </div>
+             )}
+
+             <h6 className="text-muted ps-1 mb-3 small fw-bold">FINANCIAL STATUS</h6>
              <div className="row g-3">
                {stats.finalReport.map(m => (
                  <div key={m.id} className="col-12 col-md-6">
                    <div className={`app-card p-3 d-flex justify-content-between align-items-center ${loggedInMemberId===m.id ? 'border-primary border-2':''}`}>
-                     <div><h6 className="fw-bold mb-1 text-dark">{m.name}</h6><div className="small text-muted">Meals: {m.totalMeals} | Spent: ৳{m.totalCost}</div></div>
-                     <div className={`px-3 py-1 rounded-pill small fw-bold ${m.balance >= 0 ? 'bg-success bg-opacity-10 text-success' : 'bg-danger bg-opacity-10 text-danger'}`}>{m.balance >= 0 ? '+' : '-'}{Math.abs(m.balance).toFixed(0)}</div>
+                     <div><h6 className="fw-bold mb-1 text-dark">{m.name} {loggedInMemberId===m.id && '(Me)'}</h6><div className="small text-muted">Meals: {m.totalMeals} | Spent: {CURRENCY}{m.totalCost}</div></div>
+                     <div className={`px-3 py-1 rounded-pill small fw-bold ${m.balance >= 0 ? 'bg-success bg-opacity-10 text-success' : 'bg-danger bg-opacity-10 text-danger'}`}>{m.balance >= 0 ? 'Get' : 'Give'} {Math.abs(m.balance).toFixed(0)}</div>
                    </div>
                  </div>
                ))}
@@ -251,47 +296,70 @@ const Home = () => {
           </div>
         )}
 
-        {/* --- TAB 3: MY BAZAAR (RESTRICTED) --- */}
-        {activeTab === 'my_bazaar' && (
+        {/* --- TAB 3: MY ZONE (ADD & MANAGE) --- */}
+        {activeTab === 'my_zone' && (
           <div className="animate__animated animate__fadeIn">
             
-            {/* SHIFT STATUS BANNER */}
-            <div className={`app-card p-3 mb-4 text-center border-0 text-white ${isMyShiftToday ? 'bg-success' : 'bg-secondary'}`}>
-               <h6 className="fw-bold mb-1">{isMyShiftToday ? "✅ Your Shift is Active" : "⛔ Not Your Shift Today"}</h6>
-               <small className="opacity-75">Your assigned dates: {myShiftInfo.startDay} - {myShiftInfo.endDay}</small>
-            </div>
+            <button className={`btn w-100 rounded-pill py-3 shadow-sm mb-4 fw-bold d-flex align-items-center justify-content-center gap-2 ${showAddModal ? 'btn-danger' : 'btn-primary'}`} onClick={() => { setShowAddModal(!showAddModal); if(!showAddModal) openAddModal(); }}>{showAddModal ? <><FaTimes /> Close Form</> : <><FaPlus /> Add Expense</>}</button>
 
-            {/* ADD FORM (ONLY VISIBLE IF SHIFT IS ACTIVE) */}
-            {isMyShiftToday ? (
-              <>
-                <button className={`btn w-100 rounded-pill py-3 shadow-sm mb-4 fw-bold d-flex align-items-center justify-content-center gap-2 ${showAddModal ? 'btn-danger' : 'btn-primary'}`} onClick={() => { setShowAddModal(!showAddModal); if(!showAddModal) { setEditingId(null); setCurrentItems([{ name: '', price: '' }]); } }}>{showAddModal ? <><FaTimes /> Close Form</> : <><FaPlus /> Add New Expense</>}</button>
-
-                {showAddModal && (
-                  <div className="app-card p-4 mb-4 border-start border-4 border-primary">
-                    <h6 className="fw-bold mb-3 text-primary">{editingId ? 'Edit Entry' : 'Add Daily Bazaar'}</h6>
-                    <form onSubmit={submitBazaar}>
-                      <div className="row g-2 mb-3">
-                        <div className="col-6"><label className="small text-muted mb-1">Date</label><input type="date" className="form-control modern-input" value={inputDate} onChange={e => setInputDate(e.target.value)} required /></div>
-                        <div className="col-6"><label className="small text-muted mb-1">Shopper</label><input type="text" className="form-control modern-input bg-light fw-bold" value={myShiftInfo.name} readOnly /></div>
-                      </div>
-                      {currentItems.map((item, idx) => (
-                        <div key={idx} className="d-flex gap-2 mb-2"><input placeholder="Item" className="form-control modern-input" value={item.name} onChange={e => handleItemChange(idx, 'name', e.target.value)} /><input placeholder="Price" type="number" className="form-control modern-input" style={{width:'80px'}} value={item.price} onChange={e => handleItemChange(idx, 'price', e.target.value)} />{currentItems.length > 1 && <button type="button" className="btn btn-light text-danger px-2" onClick={() => removeItemField(idx)}>✕</button>}</div>
-                      ))}
-                      <div className="d-flex justify-content-between mt-2 mb-3"><button type="button" className="btn btn-sm text-primary p-0" onClick={addItemField}>+ Add Row</button></div>
-                      <button type="submit" className="btn btn-primary w-100 rounded-pill fw-bold">{editingId ? 'Update' : 'Save'}</button>
-                    </form>
+            {showAddModal && (
+              <div className="app-card p-4 mb-4 border-start border-4 border-primary">
+                <h6 className="fw-bold mb-3 text-primary">{editingId ? 'Edit Entry' : 'Add New Expense'}</h6>
+                <form onSubmit={submitBazaar}>
+                  
+                  {/* EXPENSE TYPE SELECTOR */}
+                  <div className="mb-3">
+                     <label className="small text-muted mb-1 d-block">Expense Type</label>
+                     <div className="btn-group w-100" role="group">
+                        <button type="button" className={`btn btn-sm ${expenseType === 'Regular' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setExpenseType('Regular')}>🛒 Bazaar</button>
+                        <button type="button" className={`btn btn-sm ${expenseType === 'Extra' ? 'btn-warning' : 'btn-outline-warning text-dark'}`} onClick={() => setExpenseType('Extra')}>⚡ Extra/Bill</button>
+                     </div>
                   </div>
-                )}
-              </>
-            ) : null}
 
-            {/* MY PERSONAL LIST ONLY */}
-            <h6 className="text-muted mb-3 small fw-bold">MY ADDED ITEMS</h6>
+                  {/* PROXY SELECTOR */}
+                  <div className="form-check form-switch mb-3 bg-light p-2 rounded border">
+                    <input className="form-check-input" type="checkbox" id="proxySwitch" checked={isProxy} onChange={(e) => setIsProxy(e.target.checked)} />
+                    <label className="form-check-label small fw-bold ms-2" htmlFor="proxySwitch">Shopping for someone else? (Proxy)</label>
+                  </div>
+
+                  {isProxy && (
+                    <div className="mb-3 animate__animated animate__fadeIn">
+                       <label className="small text-muted mb-1">Select Original Shift Owner</label>
+                       <select className="form-select modern-input border-warning" value={proxyForId} onChange={e => setProxyForId(e.target.value)} required>
+                          <option value="">-- Select Member --</option>
+                          {MEMBERS_CONFIG.filter(m => m.id !== loggedInMemberId).map(m => (
+                              <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                       </select>
+                       <small className="text-warning" style={{fontSize: '0.7rem'}}>* Balance will be added to YOU, but history will show their name.</small>
+                    </div>
+                  )}
+
+                  <div className="row g-2 mb-3">
+                    <div className="col-6"><label className="small text-muted mb-1">Date</label><input type="date" className="form-control modern-input" value={inputDate} onChange={e => setInputDate(e.target.value)} required /></div>
+                    <div className="col-6"><label className="small text-muted mb-1">Shopper (You)</label><input type="text" className="form-control modern-input bg-light fw-bold text-muted" value={loggedInMemberInfo?.name} readOnly /></div>
+                  </div>
+
+                  {currentItems.map((item, idx) => (
+                    <div key={idx} className="d-flex gap-2 mb-2"><input placeholder="Item Name" className="form-control modern-input" value={item.name} onChange={e => handleItemChange(idx, 'name', e.target.value)} /><input placeholder="Price" type="number" className="form-control modern-input" style={{width:'80px'}} value={item.price} onChange={e => handleItemChange(idx, 'price', e.target.value)} />{currentItems.length > 1 && <button type="button" className="btn btn-light text-danger px-2" onClick={() => removeItemField(idx)}>✕</button>}</div>
+                  ))}
+                  <div className="d-flex justify-content-between mt-2 mb-3"><button type="button" className="btn btn-sm text-primary p-0" onClick={addItemField}>+ Add Row</button></div>
+                  <button type="submit" className="btn btn-primary w-100 rounded-pill fw-bold">{editingId ? 'Update' : 'Save Entry'}</button>
+                </form>
+              </div>
+            )}
+
+            <h6 className="text-muted mb-3 small fw-bold">MY RECENT ADDS</h6>
             <div className="d-flex flex-column gap-3">
-               {bazaarList.filter(item => item.shopperId === loggedInMemberId).map((e) => (
+               {bazaarList.filter(item => item.createdBy === user.email).map((e) => (
                   <div key={e.id} className="app-card p-3 border-start border-4 border-primary">
                      <div className="d-flex justify-content-between align-items-center mb-2">
-                        <div><span className="badge bg-primary bg-opacity-10 text-primary mb-1">{e.date}</span><h6 className="fw-bold mb-0 text-dark">৳{e.subTotal}</h6></div>
+                        <div>
+                            <span className="badge bg-light text-dark mb-1 me-2">{e.date}</span>
+                            {e.type === 'Extra' && <span className="badge bg-warning text-dark me-2">⚡ Extra</span>}
+                            {e.isProxy && <span className="badge bg-info text-dark">🛡 Proxy</span>}
+                            <h6 className="fw-bold mb-0 text-dark mt-1">{CURRENCY}{e.subTotal}</h6>
+                        </div>
                         <div className="d-flex gap-2"><button className="btn btn-sm btn-outline-primary border-0 bg-primary bg-opacity-10" onClick={() => handleEdit(e)}><FaEdit /></button><button className="btn btn-sm btn-outline-danger border-0 bg-danger bg-opacity-10" onClick={() => deleteBazaar(e.id)}><FaTrash /></button></div>
                      </div>
                      <div className="bg-light p-2 rounded small text-muted">
@@ -299,69 +367,81 @@ const Home = () => {
                      </div>
                   </div>
                ))}
-               {bazaarList.filter(item => item.shopperId === loggedInMemberId).length === 0 && <div className="text-center text-muted py-4"><small>You haven't added any bazaar yet.</small></div>}
+               {bazaarList.filter(item => item.createdBy === user.email).length === 0 && <div className="text-center text-muted py-4"><small>You haven't added anything yet.</small></div>}
             </div>
           </div>
         )}
 
-        {/* --- TAB 4: HISTORY (ALL SUMMARY) --- */}
+        {/* --- TAB 4: HISTORY (ALL) --- */}
         {activeTab === 'history' && (
           <div className="animate__animated animate__fadeIn">
              <div className="d-flex justify-content-between align-items-center mb-3">
-                <h6 className="text-muted small fw-bold m-0">ALL BAZAAR HISTORY</h6>
+                <h6 className="text-muted small fw-bold m-0">FULL HISTORY</h6>
                 <span className="badge bg-secondary">{bazaarList.length} Entries</span>
              </div>
              
              <div className="d-flex flex-column gap-3">
-               {bazaarList.map((e) => (
+               {bazaarList.map((e) => {
+                 const originalOwner = MEMBERS_CONFIG.find(m => m.id === (e.originalShopperId || e.shopperId));
+                 const actualSpender = MEMBERS_CONFIG.find(m => m.id === e.shopperId);
+                 const isProxyEntry = e.isProxy || (e.originalShopperId && e.originalShopperId !== e.shopperId);
+
+                 return (
                  <div key={e.id} className="app-card p-0 overflow-hidden">
-                   {/* Summary Header */}
-                   <div 
-                      className="p-3 d-flex justify-content-between align-items-center" 
-                      style={{cursor: 'pointer', backgroundColor: expandedDateId === e.id ? '#F3F4F6' : 'white'}}
-                      onClick={() => setExpandedDateId(expandedDateId === e.id ? null : e.id)}
-                   >
+                   <div className="p-3 d-flex justify-content-between align-items-center" style={{cursor: 'pointer', backgroundColor: expandedDateId === e.id ? '#F3F4F6' : 'white'}} onClick={() => setExpandedDateId(expandedDateId === e.id ? null : e.id)}>
                       <div className="d-flex align-items-center gap-3">
-                         <div className="bg-light p-2 rounded text-center" style={{minWidth:'50px'}}>
+                         <div className={`p-2 rounded text-center border ${e.type === 'Extra' ? 'bg-warning bg-opacity-10 border-warning' : 'bg-light'}`} style={{minWidth:'50px'}}>
                             <small className="d-block text-muted" style={{fontSize:'0.6rem'}}>DATE</small>
                             <span className="fw-bold text-dark">{e.date.split('-')[2]}</span>
                          </div>
                          <div>
-                            <h6 className="fw-bold mb-0 text-dark">{MEMBERS_CONFIG.find(m=>m.id === e.shopperId)?.name}</h6>
-                            <small className="text-muted">{e.items.length} Items</small>
+                            <h6 className="fw-bold mb-0 text-dark d-flex align-items-center gap-1">
+                                {originalOwner?.name}
+                                {e.type === 'Extra' && <FaBolt className="text-warning small" title="Extra Cost"/>}
+                            </h6>
+                            
+                            {/* Proxy & Spender Info */}
+                            <small className="text-muted d-block" style={{fontSize:'0.75rem'}}>
+                                {isProxyEntry ? (
+                                    <span className="text-info"><FaUserShield className="me-1"/>Paid by {actualSpender?.name}</span>
+                                ) : (
+                                    <span>{e.items.length} Items</span>
+                                )}
+                            </small>
                          </div>
                       </div>
                       <div className="text-end">
-                         <h6 className="fw-bold text-primary mb-0">৳{e.subTotal}</h6>
+                         <h6 className="fw-bold text-primary mb-0">{CURRENCY}{e.subTotal}</h6>
                          <small className="text-muted">{expandedDateId === e.id ? <FaChevronUp /> : <FaChevronDown />}</small>
                       </div>
                    </div>
-
-                   {/* Expanded Details */}
                    {expandedDateId === e.id && (
                      <div className="bg-light p-3 border-top">
                         {e.items.map((item, i) => (
                            <div key={i} className="d-flex justify-content-between py-1 border-bottom border-white">
                               <span className="small text-dark">{item.name}</span>
-                              <span className="small fw-bold text-dark">৳{item.price}</span>
+                              <span className="small fw-bold text-dark">{CURRENCY}{item.price}</span>
                            </div>
                         ))}
+                        {/* Footer Info */}
+                        <div className="mt-2 text-end">
+                            <span className="badge bg-white border text-muted">Added by: {e.createdBy?.split('@')[0]}</span>
+                        </div>
                      </div>
                    )}
                  </div>
-               ))}
-               {bazaarList.length === 0 && <div className="text-center text-muted py-5"><FaHistory className="mb-2" size={24} /><p>No history found.</p></div>}
+               )})}
              </div>
           </div>
         )}
 
       </div>
 
-      {/* BOTTOM NAVIGATION (4 ITEMS) */}
+      {/* BOTTOM NAV */}
       <div className="bottom-nav">
         <button className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}><FaHome className="nav-icon" /><span>Home</span></button>
         <button className={`nav-item ${activeTab === 'meals' ? 'active' : ''}`} onClick={() => setActiveTab('meals')}><BiDish className="nav-icon" /><span>Meals</span></button>
-        <button className={`nav-item ${activeTab === 'my_bazaar' ? 'active' : ''}`} onClick={() => setActiveTab('my_bazaar')}><FaPlus className="nav-icon" /><span>My Zone</span></button>
+        <button className={`nav-item ${activeTab === 'my_zone' ? 'active' : ''}`} onClick={() => setActiveTab('my_zone')}><FaPlus className="nav-icon" /><span>My Zone</span></button>
         <button className={`nav-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}><FaListAlt className="nav-icon" /><span>History</span></button>
       </div>
     </div>
