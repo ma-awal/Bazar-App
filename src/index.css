@@ -1,96 +1,239 @@
- :root {
-  --primary-color: #4F46E5;
-  --bg-color: #F9FAFB;
-  --card-bg: #FFFFFF;
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+
+:root {
+  /* --- COLOR PALETTE --- */
+  --primary: #6c5dd3; /* Modern Purple */
+  --primary-dark: #5646a3; /* Darker Purple for Hover */
+  --danger: #ff4d4d; /* Red for Badges/Locks/Off */
+  --success: #00d26a; /* Green for Active/On */
+
+  /* --- LIGHT THEME BACKGROUNDS --- */
+  --bg-body: #f4f7fe; /* Very Light Blue-Grey (Dashboard Background) */
+  --bg-card: #ffffff; /* Pure White Cards */
+  --bg-sidebar: #ffffff; /* White Sidebar */
+
+  /* --- TEXT COLORS --- */
+  --text-main: #2b3674; /* Dark Navy Blue (Looks better than black) */
+  --text-muted: #a3aed0; /* Soft Grey */
+  --border: #e0e5f2; /* Light Border */
+}
+
+/* Reset & Base */
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  background-color: var(--bg-color);
-  font-family: 'Segoe UI', sans-serif;
-  padding-bottom: 90px; /* Bottom Nav space */
+  background-color: var(--bg-body);
+  color: var(--text-main);
+  font-family: 'Outfit', sans-serif;
+  overflow-x: hidden;
 }
 
-/* Modern Card */
-.app-card {
-  background: var(--card-bg);
-  border-radius: 12px;
-  border: 1px solid #E5E7EB;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  transition: all 0.2s;
+/* --- Typography --- */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--text-main) !important;
+  font-weight: 700;
+}
+p,
+span,
+div,
+li,
+label {
+  color: var(--text-main);
+}
+.text-muted {
+  color: var(--text-muted) !important;
+}
+.text-primary-custom {
+  color: var(--primary) !important;
+}
+.text-danger {
+  color: var(--danger) !important;
+}
+.text-success {
+  color: var(--success) !important;
 }
 
-.app-card:hover {
-  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-}
-
-/* Header */
-.header-gradient {
-  background: linear-gradient(135deg, #4F46E5 0%, #4338CA 100%);
-  color: white;
-  padding: 20px 20px 50px 20px;
-  border-radius: 0 0 24px 24px;
-  margin-bottom: -35px;
-  box-shadow: 0 4px 20px rgba(79, 70, 229, 0.2);
-}
-
-/* Bottom Nav */
-.bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  background: white;
-  display: flex;
-  justify-content: space-around;
-  padding: 10px 0;
-  border-top: 1px solid #E5E7EB;
-  z-index: 1000;
-  padding-bottom: env(safe-area-inset-bottom);
-}
-
-.nav-item {
+/* --- Layout System --- */
+.dashboard-container {
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  font-size: 11px;
-  color: #6B7280;
-  background: none;
+}
+
+/* Desktop View */
+@media (min-width: 992px) {
+  .dashboard-container {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+  }
+
+  .sidebar {
+    background: var(--bg-sidebar);
+    height: 100vh;
+    position: sticky;
+    top: 0;
+    padding: 25px;
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+    /* Soft Shadow for Sidebar */
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.02);
+    border-right: none;
+  }
+
+  .bottom-nav {
+    display: none !important;
+  }
+}
+
+/* Mobile View */
+@media (max-width: 991px) {
+  .sidebar {
+    display: none !important;
+  }
+
+  .dashboard-container {
+    display: block;
+    padding-bottom: 90px;
+  }
+
+  .bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    padding: 15px 0;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    z-index: 1000;
+    box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.05);
+    border-radius: 20px 20px 0 0;
+  }
+}
+
+/* --- Main Content --- */
+.main-content {
+  padding: 30px;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* --- Components --- */
+.card-custom {
+  background-color: var(--bg-card);
+  border: 1px solid transparent; /* No border for clean look */
+  border-radius: 20px;
+  /* Soft floating shadow */
+  box-shadow: 0 4px 20px rgba(112, 144, 176, 0.12);
+  transition: 0.3s;
+}
+.card-custom:hover {
+  transform: translateY(-3px);
+}
+
+/* Input Fields (Light Mode) */
+.form-control,
+.form-select {
+  background-color: #f8f9fa !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text-main) !important;
+  padding: 12px 15px;
+  border-radius: 12px;
+}
+.form-control:focus {
+  border-color: var(--primary) !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 0 0 3px rgba(108, 93, 211, 0.1) !important;
+}
+
+/* Buttons */
+.btn-primary-custom {
+  background: var(--primary);
+  color: white !important;
+  font-weight: 600;
   border: none;
-  padding: 8px;
-  border-radius: 8px;
+  padding: 12px 25px;
+  border-radius: 12px;
+  transition: 0.2s;
+  box-shadow: 0 4px 10px rgba(108, 93, 211, 0.3);
+}
+.btn-primary-custom:hover {
+  background: var(--primary-dark);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 15px rgba(108, 93, 211, 0.4);
 }
 
-.nav-item.active {
-  color: var(--primary-color);
-  background-color: #EEF2FF;
-}
-
-.nav-icon {
-  font-size: 20px;
-  margin-bottom: 4px;
-}
-
-/* Item List Styling */
-.item-row {
+/* Sidebar Buttons */
+.btn-outline-custom {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 100%;
+  text-align: left;
+  padding: 14px 20px;
+  border-radius: 12px;
+  font-weight: 500;
+  transition: 0.2s;
   display: flex;
-  justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px dashed #E5E7EB;
+  align-items: center;
 }
-.item-row:last-child {
-  border-bottom: none;
+.btn-outline-custom:hover {
+  background: #f4f7fe;
+  color: var(--primary);
+}
+.btn-outline-custom.active {
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 4px 10px rgba(108, 93, 211, 0.3);
 }
 
-/* Input Styles */
-.modern-input {
-  background: #F3F4F6;
-  border: 1px solid transparent;
-  padding: 10px;
+/* Badges */
+.badge {
+  padding: 6px 12px;
   border-radius: 8px;
-  font-size: 14px;
 }
-.modern-input:focus {
-  background: white;
-  border-color: var(--primary-color);
-  outline: none;
+.badge-danger,
+.bg-danger {
+  background-color: var(--danger) !important;
+  color: white !important;
+}
+
+/* Table Override (Making dark tables look good in light theme) */
+.table {
+  color: var(--text-main) !important;
+  background-color: transparent !important;
+}
+.table thead th {
+  background-color: #f4f7fe !important;
+  color: var(--text-muted) !important;
+  border: none;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.table tbody td {
+  background-color: white !important;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-main) !important;
+  padding: 15px;
+}
+.table-dark {
+  background-color: transparent !important;
 }

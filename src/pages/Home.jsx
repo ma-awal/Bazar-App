@@ -1,429 +1,814 @@
- import React, { useState, useMemo, useEffect } from 'react';
-import { db, auth } from '../firebase'; 
-import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, orderBy } from 'firebase/firestore';
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-// Icons
-import { FaHome, FaWallet, FaTrash, FaPlus, FaEdit, FaChevronDown, FaChevronUp, FaTimes, FaUserClock, FaLock, FaSignOutAlt, FaHistory, FaListAlt, FaUserShield, FaBolt } from 'react-icons/fa';
-import { BiDish } from "react-icons/bi";
-// Toastify Imports
+import React, { useState, useMemo, useEffect } from 'react';
+import { db, auth } from '../firebase';
+import {
+  collection,
+  addDoc,
+  onSnapshot,
+  doc,
+  updateDoc,
+  deleteDoc,
+  setDoc,
+  query,
+  orderBy,
+} from 'firebase/firestore';
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth';
+import {
+  FaHome,
+  FaWallet,
+  FaTrash,
+  FaUtensils,
+  FaSignOutAlt,
+  FaExclamationCircle,
+  FaChevronDown,
+  FaChevronUp,
+  FaExchangeAlt,
+  FaUserCheck,
+} from 'react-icons/fa';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-// ==========================================
-// ⚙️ CLIENT CONFIGURATION
-// ==========================================
-const APP_NAME = "Smart Mess Manager";
-const CURRENCY = "৳";
+// --- CONFIGURATION WITH SPECIFIC GRADIENTS ---
+const APP_NAME = 'Smart Mess Pro';
 
- // --- CONFIGURATION ---
+// আপনার পছন্দের দুটি গ্রেডিয়েন্ট
+const GRADIENT_AWAL = 'linear-gradient(135deg, #fccb90 0%, #d57eeb 100%)'; // Peach-Purple
+const GRADIENT_GUEST = 'linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)'; // Light Purple-Blue
+
 const MEMBERS_CONFIG = [
-  { id: 1, name: 'Amit', startDay: 1, endDay: 6 },
-  { id: 2, name: 'Tofayel', startDay: 7, endDay: 12 },
-  { id: 3, name: 'Abid', startDay: 13, endDay: 18 },
-  { id: 4, name: 'Awal', startDay: 19, endDay: 24 },
-  { id: 5, name: 'Guest', startDay: 25, endDay: 30 },
+  // বিজোড় (Odd) আইডিতে Awal এর কালার, জোড় (Even) আইডিতে Guest এর কালার দেওয়া হলো সুন্দর কম্বিনেশনের জন্য
+  { id: 1, name: 'Amit', startDay: 1, endDay: 6, gradient: GRADIENT_AWAL },
+  { id: 2, name: 'Tofayel', startDay: 7, endDay: 12, gradient: GRADIENT_GUEST },
+  { id: 3, name: 'Abid', startDay: 13, endDay: 18, gradient: GRADIENT_AWAL },
+  { id: 4, name: 'Awal', startDay: 19, endDay: 24, gradient: GRADIENT_GUEST }, // Awal (Original owner of this color/style match)
+  { id: 5, name: 'Guest', startDay: 25, endDay: 30, gradient: GRADIENT_AWAL },
 ];
 
-// 🔴 গুরত্বপূর্ণ: এখানে আপনার Firebase এর আসল ইমেইলগুলো বসান
-// যেই ইমেইল যার আইডির সাথে মিলবে, সে শুধু তার ডাটাই এডিট করতে পারবে
 const MEMBER_EMAILS = {
-  'amit330@d.com': 1,  // Example Email -> ID 1 (Rahim)
-  'tofayel330@d.com': 2,  // Example Email -> ID 2 (Karim)
+  'amit330@d.com': 1,
+  'tofayel330@d.com': 2,
   'abid330@d.com': 3,
   'awal330@d.com': 4,
-  'guest330@d.com': 5
+  'guest330@d.com': 5,
 };
-// ==========================================
 
 const Home = () => {
-  // --- AUTH STATE ---
   const [user, setUser] = useState(null);
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [authLoading, setAuthLoading] = useState(true);
+
+  // Login State
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPass, setLoginPass] = useState('');
 
-  // --- APP UTILS ---
-  const [activeTab, setActiveTab] = useState('dashboard');
+  // Date & Time Logic
   const today = new Date();
-  const currentMonthName = today.toLocaleString('default', { month: 'long', year: 'numeric' });
-  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
   const currentDay = today.getDate();
+  const currentHour = today.getHours();
+  const currentMinute = today.getMinutes();
+  const currentMonthName = today.toLocaleString('default', {
+    month: 'long',
+    year: 'numeric',
+  });
+  const daysInMonth = new Date(
+    today.getFullYear(),
+    today.getMonth() + 1,
+    0
+  ).getDate();
 
-  // --- IDENTIFY MEMBER ---
-  const loggedInMemberId = useMemo(() => {
-    return user && MEMBER_EMAILS[user.email] ? MEMBER_EMAILS[user.email] : null;
-  }, [user]);
+  // 🔒 TIME LIMITS
+  const isRequestTimeOver =
+    currentHour > 18 || (currentHour === 18 && currentMinute >= 30); // 6:30 PM
+  const isManagerLocked = currentHour >= 22; // 10:00 PM (Entry Close)
 
-  const loggedInMemberInfo = useMemo(() => {
-    return loggedInMemberId ? MEMBERS_CONFIG.find(m => m.id === loggedInMemberId) : null;
-  }, [loggedInMemberId]);
-
-  const isMyShiftToday = useMemo(() => {
-    if (!loggedInMemberInfo) return false;
-    return currentDay >= loggedInMemberInfo.startDay && currentDay <= loggedInMemberInfo.endDay;
-  }, [currentDay, loggedInMemberInfo]);
-
-  // --- DATA FETCHING ---
+  // Data State
   const [bazaarList, setBazaarList] = useState([]);
   const [mealSheet, setMealSheet] = useState([]);
-  const [dataLoading, setDataLoading] = useState(true);
+  const [delegations, setDelegations] = useState({});
+  const [loading, setLoading] = useState(true);
 
+  // UI State
+  const [expandedMemberId, setExpandedMemberId] = useState(null);
+  const [delegateToId, setDelegateToId] = useState('');
+
+  // Form State
+  const [inputDate, setInputDate] = useState(today.toISOString().split('T')[0]);
+  const [currentItems, setCurrentItems] = useState([{ name: '', price: '' }]);
+
+  // Identity Logic
+  const loggedInMemberId = useMemo(
+    () =>
+      user && MEMBER_EMAILS[user.email] ? MEMBER_EMAILS[user.email] : null,
+    [user]
+  );
+  const loggedInMemberInfo = useMemo(
+    () =>
+      loggedInMemberId
+        ? MEMBERS_CONFIG.find((m) => m.id === loggedInMemberId)
+        : null,
+    [loggedInMemberId]
+  );
+
+  const currentShiftManager = useMemo(() => {
+    return MEMBERS_CONFIG.find(
+      (m) => currentDay >= m.startDay && currentDay <= m.endDay
+    );
+  }, [currentDay]);
+
+  const delegatedManagerId = delegations[inputDate];
+
+  const hasAccess = useMemo(() => {
+    if (delegatedManagerId) return loggedInMemberId === delegatedManagerId;
+    return currentShiftManager?.id === loggedInMemberId; // Official manager access logic simplified for date matching in submit
+  }, [delegatedManagerId, loggedInMemberId, currentShiftManager]);
+
+  // Only allow official manager to delegate/revoke
+  const isOfficialManager = loggedInMemberId === currentShiftManager?.id;
+
+  // --- EFFECTS ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
       setAuthLoading(false);
     });
-    return () => unsubscribe();
+    return () => unsub();
   }, []);
 
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, "bazaar"), orderBy("timestamp", "desc"));
-    const unsubscribeBazaar = onSnapshot(q, (snapshot) => {
-      setBazaarList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    const unsubscribeMeals = onSnapshot(doc(db, "settings", "mealSheet"), (docSnap) => {
-      if (docSnap.exists()) {
-        setMealSheet(docSnap.data().sheet);
-      } else {
-        const initialSheet = [];
-        for (let i = 1; i <= daysInMonth; i++) {
-          const dailyStatus = {};
-          MEMBERS_CONFIG.forEach(m => dailyStatus[m.id] = true);
-          initialSheet.push({ day: i, status: dailyStatus });
-        }
-        setDoc(doc(db, "settings", "mealSheet"), { sheet: initialSheet });
-      }
-      setDataLoading(false);
-    });
-    return () => { unsubscribeBazaar(); unsubscribeMeals(); };
-  }, [user, daysInMonth]);
+    const q = query(collection(db, 'bazaar'), orderBy('timestamp', 'desc'));
+    const unsubBazaar = onSnapshot(q, (snap) =>
+      setBazaarList(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })))
+    );
 
-  // --- FORM STATES ---
-  const [inputDate, setInputDate] = useState(today.toISOString().split('T')[0]);
-  const [currentItems, setCurrentItems] = useState([{ name: '', price: '' }]);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [expandedDateId, setExpandedDateId] = useState(null);
-  
-  const [expenseType, setExpenseType] = useState('Regular');
-  const [isProxy, setIsProxy] = useState(false);
-  const [proxyForId, setProxyForId] = useState('');
+    const unsubMeals = onSnapshot(
+      doc(db, 'settings', 'mealSheet'),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          setMealSheet(docSnap.data().sheet);
+        } else {
+          const sheet = Array.from({ length: daysInMonth }, (_, i) => ({
+            day: i + 1,
+            status: MEMBERS_CONFIG.reduce(
+              (acc, m) => ({ ...acc, [m.id]: true }),
+              {}
+            ),
+            requests: MEMBERS_CONFIG.reduce(
+              (acc, m) => ({ ...acc, [m.id]: false }),
+              {}
+            ),
+          }));
+          setDoc(doc(db, 'settings', 'mealSheet'), { sheet });
+        }
+      }
+    );
+
+    const unsubDelegation = onSnapshot(
+      doc(db, 'settings', 'delegations'),
+      (docSnap) => {
+        if (docSnap.exists()) setDelegations(docSnap.data());
+        else setDoc(doc(db, 'settings', 'delegations'), {});
+        setLoading(false);
+      }
+    );
+
+    return () => {
+      unsubBazaar();
+      unsubMeals();
+      unsubDelegation();
+    };
+  }, [user, daysInMonth]);
 
   // --- ACTIONS ---
   const handleLogin = async (e) => {
     e.preventDefault();
-    try { 
-      await signInWithEmailAndPassword(auth, loginEmail, loginPass); 
-      toast.success(`Welcome back! 👋`, { theme: "colored" });
-    } catch (error) { 
-      toast.error('Invalid Email or Password! ❌'); 
+    try {
+      await signInWithEmailAndPassword(auth, loginEmail, loginPass);
+    } catch (err) {
+      toast.error('Invalid Credentials');
     }
-  };
-
-  const handleLogout = async () => {
-    await signOut(auth);
-    toast.info("Logged out successfully");
-  };
-
-  const addItemField = () => setCurrentItems([...currentItems, { name: '', price: '' }]);
-  const handleItemChange = (idx, field, val) => {
-    const newItems = [...currentItems]; newItems[idx][field] = val; setCurrentItems(newItems);
-  };
-  const removeItemField = (idx) => setCurrentItems(currentItems.filter((_, i) => i !== idx));
-  
-  const openAddModal = () => {
-      setShowAddModal(true);
-      setEditingId(null);
-      setCurrentItems([{ name: '', price: '' }]);
-      setExpenseType('Regular');
-      setIsProxy(!isMyShiftToday);
-      setProxyForId(isMyShiftToday ? loggedInMemberId : '');
-  };
-
-  const handleEdit = (entry) => {
-    if(entry.createdBy !== user.email) { 
-        toast.warning("🚫 Access Denied! You can only edit your own entries."); 
-        return; 
-    }
-    setInputDate(entry.date); setCurrentItems(entry.items); setEditingId(entry.id);
-    setExpenseType(entry.type || 'Regular');
-    setIsProxy(entry.isProxy || false);
-    setProxyForId(entry.originalShopperId || entry.shopperId);
-    setShowAddModal(true); 
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const submitBazaar = async (e) => {
     e.preventDefault();
-    
-    // Validations
-    let finalOriginalShopperId = loggedInMemberId;
-    if (isProxy) {
-        if(!proxyForId) { toast.warn("Please select who you are shopping for!"); return; }
-        finalOriginalShopperId = parseInt(proxyForId);
-    } else {
-        if (!isMyShiftToday && expenseType === 'Regular') {
-             toast.error("⛔ Not your shift! Use 'Proxy Mode' or wait for your dates.");
-             return;
-        }
+    if (!hasAccess) {
+      toast.error("⛔ You don't have permission for this date!");
+      return;
+    }
+    if (isManagerLocked && inputDate === today.toISOString().split('T')[0]) {
+      toast.error('⛔ Time Over!');
+      return;
     }
 
-    const validItems = currentItems.filter(i => i.name && i.price);
-    if (!inputDate || validItems.length === 0) {
-        toast.warn("Please add at least one item and date.");
-        return;
+    const validItems = currentItems.filter((i) => i.name && i.price);
+    const subTotal = validItems.reduce(
+      (acc, curr) => acc + parseFloat(curr.price),
+      0
+    );
+
+    await addDoc(collection(db, 'bazaar'), {
+      date: inputDate,
+      shopperId: loggedInMemberId,
+      items: validItems,
+      subTotal,
+      timestamp: Date.now(),
+      createdBy: user.email,
+    });
+    setCurrentItems([{ name: '', price: '' }]);
+    toast.success('Bazaar Added!');
+  };
+
+  const handleDelegation = async () => {
+    if (!delegateToId) {
+      toast.warning('Select a member first!');
+      return;
     }
-    
-    const subTotal = validItems.reduce((acc, curr) => acc + parseFloat(curr.price), 0);
-    const payload = { 
-      date: inputDate, shopperId: loggedInMemberId, originalShopperId: finalOriginalShopperId, 
-      items: validItems, subTotal, type: expenseType, isProxy: isProxy, createdBy: user.email, 
-      timestamp: editingId ? bazaarList.find(b => b.id === editingId).timestamp : Date.now() 
+    const newDelegations = {
+      ...delegations,
+      [inputDate]: parseInt(delegateToId),
     };
-
-    try {
-      if (editingId) {
-          await updateDoc(doc(db, "bazaar", editingId), payload);
-          toast.success("Entry Updated Successfully! 📝", { theme: "colored" });
-      } else {
-          await addDoc(collection(db, "bazaar"), payload);
-          toast.success("New Expense Added! 💸", { theme: "colored" });
-      }
-      setShowAddModal(false);
-    } catch (error) { toast.error("Failed to save data. Check internet."); }
+    await updateDoc(doc(db, 'settings', 'delegations'), newDelegations);
+    toast.success('Access Delegated Successfully');
+    setDelegateToId('');
   };
 
-  const deleteBazaar = async (id) => { 
-      if(window.confirm('Are you sure you want to delete this?')) {
-          await deleteDoc(doc(db, "bazaar", id));
-          toast.info("Entry Deleted 🗑️");
-      }
+  const cancelDelegation = async () => {
+    const newDelegations = { ...delegations };
+    delete newDelegations[inputDate];
+    await setDoc(doc(db, 'settings', 'delegations'), newDelegations);
+    toast.info('Access Taken Back!');
   };
-  
-  const toggleMeal = async (dIdx, mId) => {
-    const newSheet = [...mealSheet]; newSheet[dIdx].status[mId] = !newSheet[dIdx].status[mId];
-    await updateDoc(doc(db, "settings", "mealSheet"), { sheet: newSheet });
-    // Optional: toast.success("Meal Updated", { autoClose: 500, hideProgressBar: true });
+
+  const handleSelfRequest = async (dIdx) => {
+    const targetDay = mealSheet[dIdx].day;
+    if (targetDay !== currentDay) {
+      toast.warning('Only today!');
+      return;
+    }
+    if (isRequestTimeOver) {
+      toast.error('Time Over!');
+      return;
+    }
+    const newSheet = [...mealSheet];
+    const currentReq = newSheet[dIdx].requests[loggedInMemberId];
+    newSheet[dIdx].requests[loggedInMemberId] = !currentReq;
+    await updateDoc(doc(db, 'settings', 'mealSheet'), { sheet: newSheet });
+    toast.info('Request Updated');
+  };
+
+  const handleManagerAction = async (dIdx, memberId) => {
+    if (!isOfficialManager) {
+      toast.error('Only Official Manager can change meals!');
+      return;
+    }
+    const targetDay = mealSheet[dIdx].day;
+    if (targetDay !== currentDay) {
+      toast.error('Cannot modify past/future history!');
+      return;
+    }
+    if (isManagerLocked) {
+      toast.error('Manager time over (7:00 PM)!');
+      return;
+    }
+
+    const newSheet = [...mealSheet];
+    newSheet[dIdx].status[memberId] = !newSheet[dIdx].status[memberId];
+    if (!newSheet[dIdx].status[memberId])
+      newSheet[dIdx].requests[memberId] = false;
+    await updateDoc(doc(db, 'settings', 'mealSheet'), { sheet: newSheet });
+    toast.success('Updated');
+  };
+
+  const deleteBazaar = async (id) => {
+    if (window.confirm('Delete?')) await deleteDoc(doc(db, 'bazaar', id));
   };
 
   // --- CALCULATIONS ---
   const stats = useMemo(() => {
-    let totalBazaarCost = 0;
-    const memberStats = MEMBERS_CONFIG.map(m => ({ ...m, totalMeals: 0, totalCost: 0 }));
-    bazaarList.forEach(e => {
-      totalBazaarCost += e.subTotal;
-      const spender = memberStats.find(m => m.id === e.shopperId);
-      if (spender) spender.totalCost += e.subTotal;
+    let totalBazaar = 0;
+    const memberStats = MEMBERS_CONFIG.map((m) => ({
+      ...m,
+      totalMeals: 0,
+      totalCost: 0,
+      totalOffs: 0,
+    }));
+    bazaarList.forEach((e) => {
+      totalBazaar += e.subTotal;
+      const s = memberStats.find((m) => m.id === e.shopperId);
+      if (s) s.totalCost += e.subTotal;
     });
     let grandTotalMeals = 0;
-    mealSheet.forEach(d => { MEMBERS_CONFIG.forEach(m => { if (d.status && d.status[m.id]) { memberStats.find(me => me.id === m.id).totalMeals += 1; grandTotalMeals += 1; } }); });
-    const mealRate = grandTotalMeals > 0 ? (totalBazaarCost / grandTotalMeals) : 0;
-    const finalReport = memberStats.map(m => ({ ...m, mealCost: m.totalMeals * mealRate, balance: m.totalCost - (m.totalMeals * mealRate) }));
-    return { totalBazaarCost, mealRate, finalReport };
+    mealSheet.forEach((d) => {
+      MEMBERS_CONFIG.forEach((m) => {
+        if (d.status[m.id]) {
+          memberStats.find((me) => me.id === m.id).totalMeals += 1;
+          grandTotalMeals += 1;
+        } else {
+          memberStats.find((me) => me.id === m.id).totalOffs += 1;
+        }
+      });
+    });
+    const mealRate = grandTotalMeals > 0 ? totalBazaar / grandTotalMeals : 0;
+    const finalReport = memberStats.map((m) => ({
+      ...m,
+      mealCost: m.totalMeals * mealRate,
+      balance: m.totalCost - m.totalMeals * mealRate,
+    }));
+    return { totalBazaar, mealRate, finalReport };
   }, [bazaarList, mealSheet]);
 
-
-  // --- VIEW: LOGIN ---
-  if (authLoading) return <div className="vh-100 d-flex justify-content-center align-items-center"><div className="spinner-border text-primary"></div></div>;
-  if (!user) return (
-    <>
-    <ToastContainer position="top-center" theme="light" />
-    <div className="vh-100 d-flex justify-content-center align-items-center bg-light px-3">
-      <div className="card border-0 shadow-lg p-4" style={{maxWidth:'400px', width:'100%', borderRadius:'20px'}}>
-        <div className="text-center mb-4"><div className="bg-primary bg-opacity-10 p-3 rounded-circle d-inline-block mb-3 text-primary"><FaLock size={30} /></div><h4 className="fw-bold">{APP_NAME}</h4><p className="text-muted small">Secure Member Login</p></div>
-        <form onSubmit={handleLogin}><div className="mb-3"><input type="email" className="form-control modern-input py-3" placeholder="Email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} required /></div><div className="mb-4"><input type="password" className="form-control modern-input py-3" placeholder="Password" value={loginPass} onChange={e=>setLoginPass(e.target.value)} required /></div><button className="btn btn-primary w-100 py-3 rounded-pill fw-bold shadow-sm">Login</button></form>
+  if (authLoading)
+    return (
+      <div className="d-flex vh-100 justify-content-center align-items-center">
+        Loading...
       </div>
-    </div>
-    </>
-  );
-
-  // --- VIEW: APP ---
-  if (dataLoading) return <div className="vh-100 d-flex justify-content-center align-items-center"><div className="spinner-border text-primary"></div></div>;
+    );
+  if (!user)
+    return (
+      <div className="d-flex vh-100 justify-content-center align-items-center bg-light px-3">
+        <div
+          className="card-custom p-5 shadow-lg"
+          style={{ maxWidth: '400px', width: '100%', background: 'white' }}
+        >
+          <h2 className="text-center text-primary-custom mb-4">{APP_NAME}</h2>
+          <form onSubmit={handleLogin}>
+            <div className="mb-3">
+              <input
+                type="email"
+                className="form-control"
+                onChange={(e) => setLoginEmail(e.target.value)}
+                required
+              />
+            </div>
+            <div className="mb-4">
+              <input
+                type="password"
+                className="form-control"
+                onChange={(e) => setLoginPass(e.target.value)}
+                required
+              />
+            </div>
+            <button className="btn btn-primary-custom w-100">Login</button>
+          </form>
+        </div>
+        <ToastContainer position="top-center" theme="colored" />
+      </div>
+    );
 
   return (
-    <div className="container-fluid px-0">
-      
-      {/* 🔔 NOTIFICATION CONTAINER */}
-      <ToastContainer 
-        position="top-center"
-        autoClose={2500}
-        hideProgressBar={false}
-        newestOnTop={true}
-        closeOnClick
-        rtl={false}
-        pauseOnFocusLoss={false}
-        draggable
-        pauseOnHover
-        theme="light"
-        toastStyle={{ borderRadius: '12px', fontSize: '14px', fontWeight: '500' }}
-      />
-
-      {/* HEADER */}
-      <div className="header-gradient">
-        <div className="d-flex justify-content-between align-items-center container">
-          <div>
-            <h6 className="mb-0 text-white-50 small text-uppercase" style={{letterSpacing:'1px'}}>Welcome, {loggedInMemberInfo?.name}</h6>
-            <h2 className="fw-bold mb-0">{currentMonthName}</h2>
-          </div>
-          <button onClick={handleLogout} className="btn btn-outline-light border-0 bg-white bg-opacity-10 rounded-circle p-2"><FaSignOutAlt size={20} /></button>
+    <div className="dashboard-container">
+      <div className="sidebar shadow-sm">
+        <h3 className="mb-5 text-primary-custom px-2 fw-bold">{APP_NAME}</h3>
+        <div className="d-flex flex-column gap-2">
+          <button
+            className={`btn-outline-custom ${
+              activeTab === 'dashboard' ? 'active' : ''
+            }`}
+            onClick={() => setActiveTab('dashboard')}
+          >
+            {' '}
+            <FaHome className="me-3" /> Dashboard
+          </button>
+          <button
+            className={`btn-outline-custom ${
+              activeTab === 'meals' ? 'active' : ''
+            }`}
+            onClick={() => setActiveTab('meals')}
+          >
+            {' '}
+            <FaUtensils className="me-3" /> Meal Sheet
+          </button>
+          <button
+            className={`btn-outline-custom ${
+              activeTab === 'bazaar' ? 'active' : ''
+            }`}
+            onClick={() => setActiveTab('bazaar')}
+          >
+            {' '}
+            <FaWallet className="me-3" /> Bazaar History
+          </button>
+        </div>
+        <div className="mt-auto p-3 bg-light rounded">
+          <span className="text-dark fw-bold small">
+            {loggedInMemberInfo?.name}
+          </span>
+          <button
+            onClick={() => signOut(auth)}
+            className="btn btn-outline-danger w-100 btn-sm mt-2"
+          >
+            <FaSignOutAlt /> Logout
+          </button>
         </div>
       </div>
 
-      <div className="container mt-5 pt-2 mb-5 pb-5">
-        
-        {/* --- TAB 1: DASHBOARD --- */}
+      <div className="main-content">
+        <div className="d-flex justify-content-between align-items-center mb-4">
+          <h2 className="m-0 fw-bold text-dark">{currentMonthName}</h2>
+          {isOfficialManager && (
+            <span className="badge bg-primary px-3 py-2">
+              👑 Official Manager
+            </span>
+          )}
+        </div>
+
         {activeTab === 'dashboard' && (
           <div className="animate__animated animate__fadeIn">
-             <div className="row g-3 mb-4">
-               <div className="col-6"><div className="app-card p-3 text-center h-100"><small className="text-muted d-block mb-1">Total Expenses</small><h3 className="text-primary fw-bold mb-0">{CURRENCY}{stats.totalBazaarCost}</h3></div></div>
-               <div className="col-6"><div className="app-card p-3 text-center h-100"><small className="text-muted d-block mb-1">Meal Rate</small><h3 className="text-success fw-bold mb-0">{CURRENCY}{stats.mealRate.toFixed(1)}</h3></div></div>
-             </div>
-             
-             {!isMyShiftToday && (
-                 <div className="alert alert-warning border-0 shadow-sm d-flex align-items-center gap-2 small mb-4 rounded-3">
-                    <FaUserClock className="flex-shrink-0" />
-                    <div>Currently <strong>OFF-SHIFT</strong>. Use proxy mode if buying for others.</div>
-                 </div>
-             )}
-
-             <h6 className="text-muted ps-1 mb-3 small fw-bold">FINANCIAL STATUS</h6>
-             <div className="row g-3">
-               {stats.finalReport.map(m => (
-                 <div key={m.id} className="col-12 col-md-6">
-                   <div className={`app-card p-3 d-flex justify-content-between align-items-center ${loggedInMemberId===m.id ? 'border-primary border-2':''}`}>
-                     <div><h6 className="fw-bold mb-1 text-dark">{m.name} {loggedInMemberId===m.id && '(Me)'}</h6><div className="small text-muted">Meals: {m.totalMeals} | Spent: {CURRENCY}{m.totalCost}</div></div>
-                     <div className={`px-3 py-1 rounded-pill small fw-bold ${m.balance >= 0 ? 'bg-success bg-opacity-10 text-success' : 'bg-danger bg-opacity-10 text-danger'}`}>{m.balance >= 0 ? 'Get' : 'Give'} {Math.abs(m.balance).toFixed(0)}</div>
-                   </div>
-                 </div>
-               ))}
-             </div>
-          </div>
-        )}
-
-        {/* --- TAB 2: MEALS --- */}
-        {activeTab === 'meals' && (
-          <div className="animate__animated animate__fadeIn">
-             <div className="app-card p-3 mb-3 d-flex justify-content-between align-items-center border-start border-4 border-warning"><span className="fw-bold text-dark">Today: Day {currentDay}</span><span className="badge bg-warning text-dark">Active</span></div>
-             <div className="app-card overflow-hidden">
-                <div className="table-responsive" style={{maxHeight: '70vh'}}>
-                  <table className="table table-borderless text-center align-middle mb-0">
-                    <thead className="bg-light sticky-top border-bottom"><tr><th className="py-3 text-muted small">DAY</th>{MEMBERS_CONFIG.map(m => <th key={m.id} className="small fw-bold text-dark">{m.name.slice(0,3)}</th>)}</tr></thead>
-                    <tbody>
-                      {mealSheet.map((d, idx) => (
-                        <tr key={d.day} style={{backgroundColor: d.day === currentDay ? '#FFFBEB' : 'transparent', borderBottom: '1px solid #f3f4f6'}}>
-                          <td className="fw-bold small text-muted">{d.day}</td>
-                          {MEMBERS_CONFIG.map(m => (<td key={m.id} onClick={() => toggleMeal(idx, m.id)} className="p-2"><div className={`rounded mx-auto d-flex align-items-center justify-content-center ${d.status[m.id] ? 'bg-success text-white' : 'bg-light text-muted'}`} style={{width:'30px', height:'30px', fontSize:'10px', cursor:'pointer'}}>{d.status[m.id] ? '✓' : ''}</div></td>))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <div className="row g-4 mb-4">
+              <div className="col-md-6">
+                <div
+                  className="card-custom p-4 text-white"
+                  style={{ background: GRADIENT_GUEST }}
+                >
+                  <small className="text-dark opacity-75 fw-bold">
+                    Meal Rate
+                  </small>
+                  <h1 className="fw-bold m-0 text-dark">
+                    ৳{stats.mealRate.toFixed(2)}
+                  </h1>
                 </div>
-             </div>
-          </div>
-        )}
-
-        {/* --- TAB 3: MY ZONE --- */}
-        {activeTab === 'my_zone' && (
-          <div className="animate__animated animate__fadeIn">
-            <button className={`btn w-100 rounded-pill py-3 shadow-sm mb-4 fw-bold d-flex align-items-center justify-content-center gap-2 ${showAddModal ? 'btn-danger' : 'btn-primary'}`} onClick={() => { setShowAddModal(!showAddModal); if(!showAddModal) openAddModal(); }}>{showAddModal ? <><FaTimes /> Close Form</> : <><FaPlus /> Add Expense</>}</button>
-
-            {showAddModal && (
-              <div className="app-card p-4 mb-4 border-start border-4 border-primary shadow-sm">
-                <h6 className="fw-bold mb-3 text-primary">{editingId ? 'Edit Entry' : 'Add New Expense'}</h6>
-                <form onSubmit={submitBazaar}>
-                  <div className="mb-3">
-                     <label className="small text-muted mb-1 d-block">Expense Type</label>
-                     <div className="btn-group w-100" role="group">
-                        <button type="button" className={`btn btn-sm ${expenseType === 'Regular' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setExpenseType('Regular')}>🛒 Bazaar</button>
-                        <button type="button" className={`btn btn-sm ${expenseType === 'Extra' ? 'btn-warning' : 'btn-outline-warning text-dark'}`} onClick={() => setExpenseType('Extra')}>⚡ Extra/Bill</button>
-                     </div>
-                  </div>
-                  <div className="form-check form-switch mb-3 bg-light p-2 rounded border">
-                    <input className="form-check-input" type="checkbox" id="proxySwitch" checked={isProxy} onChange={(e) => setIsProxy(e.target.checked)} />
-                    <label className="form-check-label small fw-bold ms-2" htmlFor="proxySwitch">Proxy Shopping Mode</label>
-                  </div>
-                  {isProxy && (
-                    <div className="mb-3 animate__animated animate__fadeIn">
-                       <label className="small text-muted mb-1">Select Original Shift Owner</label>
-                       <select className="form-select modern-input border-warning" value={proxyForId} onChange={e => setProxyForId(e.target.value)} required>
-                          <option value="">-- Select Member --</option>
-                          {MEMBERS_CONFIG.filter(m => m.id !== loggedInMemberId).map(m => (<option key={m.id} value={m.id}>{m.name}</option>))}
-                       </select>
-                       <small className="text-warning" style={{fontSize: '0.7rem'}}>* You pay, but history shows their name.</small>
-                    </div>
-                  )}
-                  <div className="row g-2 mb-3">
-                    <div className="col-6"><label className="small text-muted mb-1">Date</label><input type="date" className="form-control modern-input" value={inputDate} onChange={e => setInputDate(e.target.value)} required /></div>
-                    <div className="col-6"><label className="small text-muted mb-1">Shopper (You)</label><input type="text" className="form-control modern-input bg-light fw-bold text-muted" value={loggedInMemberInfo?.name} readOnly /></div>
-                  </div>
-                  {currentItems.map((item, idx) => (
-                    <div key={idx} className="d-flex gap-2 mb-2"><input placeholder="Item Name" className="form-control modern-input" value={item.name} onChange={e => handleItemChange(idx, 'name', e.target.value)} /><input placeholder="Price" type="number" className="form-control modern-input" style={{width:'80px'}} value={item.price} onChange={e => handleItemChange(idx, 'price', e.target.value)} />{currentItems.length > 1 && <button type="button" className="btn btn-light text-danger px-2" onClick={() => removeItemField(idx)}>✕</button>}</div>
-                  ))}
-                  <div className="d-flex justify-content-between mt-2 mb-3"><button type="button" className="btn btn-sm text-primary p-0" onClick={addItemField}>+ Add Row</button></div>
-                  <button type="submit" className="btn btn-primary w-100 rounded-pill fw-bold">{editingId ? 'Update' : 'Save Entry'}</button>
-                </form>
               </div>
-            )}
+              <div className="col-md-6">
+                <div
+                  className="card-custom p-4 text-white"
+                  style={{ background: GRADIENT_AWAL }}
+                >
+                  <small className="text-dark opacity-75 fw-bold">
+                    Total Cost
+                  </small>
+                  <h1 className="fw-bold m-0 text-dark">
+                    ৳{stats.totalBazaar}
+                  </h1>
+                </div>
+              </div>
+            </div>
 
-            <h6 className="text-muted mb-3 small fw-bold">MY RECENT ADDS</h6>
-            <div className="d-flex flex-column gap-3">
-               {bazaarList.filter(item => item.createdBy === user.email).map((e) => (
-                  <div key={e.id} className="app-card p-3 border-start border-4 border-primary">
-                     <div className="d-flex justify-content-between align-items-center mb-2">
-                        <div><span className="badge bg-light text-dark mb-1 me-2">{e.date}</span>{e.type === 'Extra' && <span className="badge bg-warning text-dark me-2">⚡ Extra</span>}{e.isProxy && <span className="badge bg-info text-dark">🛡 Proxy</span>}<h6 className="fw-bold mb-0 text-dark mt-1">{CURRENCY}{e.subTotal}</h6></div>
-                        <div className="d-flex gap-2"><button className="btn btn-sm btn-outline-primary border-0 bg-primary bg-opacity-10" onClick={() => handleEdit(e)}><FaEdit /></button><button className="btn btn-sm btn-outline-danger border-0 bg-danger bg-opacity-10" onClick={() => deleteBazaar(e.id)}><FaTrash /></button></div>
-                     </div>
-                     <div className="bg-light p-2 rounded small text-muted">{e.items.map(i => i.name).join(', ')}</div>
+            <h5 className="text-dark mb-3 fw-bold">Member Status</h5>
+            <div className="row g-3">
+              {stats.finalReport.map((m) => (
+                <div key={m.id} className="col-12 col-md-4">
+                  <div
+                    className="card-custom p-3 border-0 text-dark"
+                    style={{ background: m.gradient }}
+                  >
+                    <div className="d-flex justify-content-between">
+                      <h5 className="m-0 fw-bold">
+                        {m.name} {loggedInMemberId === m.id && '(Me)'}
+                      </h5>
+                      <span className="badge bg-white text-dark shadow-sm">
+                        {m.balance >= 0 ? '+' : ''}
+                        {Math.abs(m.balance).toFixed(0)}
+                      </span>
+                    </div>
+                    <div className="mt-3 d-flex justify-content-between text-dark opacity-75 small fw-bold">
+                      <span>Meals: {m.totalMeals}</span>
+                      <span>Offs: {m.totalOffs}</span>
+                    </div>
                   </div>
-               ))}
-               {bazaarList.filter(item => item.createdBy === user.email).length === 0 && <div className="text-center text-muted py-4"><small>You haven't added anything yet.</small></div>}
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* --- TAB 4: HISTORY --- */}
-        {activeTab === 'history' && (
+        {activeTab === 'meals' && (
           <div className="animate__animated animate__fadeIn">
-             <div className="d-flex justify-content-between align-items-center mb-3"><h6 className="text-muted small fw-bold m-0">FULL HISTORY</h6><span className="badge bg-secondary">{bazaarList.length} Entries</span></div>
-             <div className="d-flex flex-column gap-3">
-               {bazaarList.map((e) => {
-                 const originalOwner = MEMBERS_CONFIG.find(m => m.id === (e.originalShopperId || e.shopperId));
-                 const actualSpender = MEMBERS_CONFIG.find(m => m.id === e.shopperId);
-                 const isProxyEntry = e.isProxy || (e.originalShopperId && e.originalShopperId !== e.shopperId);
-
-                 return (
-                 <div key={e.id} className="app-card p-0 overflow-hidden">
-                   <div className="p-3 d-flex justify-content-between align-items-center" style={{cursor: 'pointer', backgroundColor: expandedDateId === e.id ? '#F3F4F6' : 'white'}} onClick={() => setExpandedDateId(expandedDateId === e.id ? null : e.id)}>
-                      <div className="d-flex align-items-center gap-3">
-                         <div className={`p-2 rounded text-center border ${e.type === 'Extra' ? 'bg-warning bg-opacity-10 border-warning' : 'bg-light'}`} style={{minWidth:'50px'}}><small className="d-block text-muted" style={{fontSize:'0.6rem'}}>DATE</small><span className="fw-bold text-dark">{e.date.split('-')[2]}</span></div>
-                         <div><h6 className="fw-bold mb-0 text-dark d-flex align-items-center gap-1">{originalOwner?.name}{e.type === 'Extra' && <FaBolt className="text-warning small"/>}</h6><small className="text-muted d-block" style={{fontSize:'0.75rem'}}>{isProxyEntry ? <span className="text-info"><FaUserShield className="me-1"/>Paid by {actualSpender?.name}</span> : <span>{e.items.length} Items</span>}</small></div>
-                      </div>
-                      <div className="text-end"><h6 className="fw-bold text-primary mb-0">{CURRENCY}{e.subTotal}</h6><small className="text-muted">{expandedDateId === e.id ? <FaChevronUp /> : <FaChevronDown />}</small></div>
-                   </div>
-                   {expandedDateId === e.id && (
-                     <div className="bg-light p-3 border-top">
-                        {e.items.map((item, i) => (<div key={i} className="d-flex justify-content-between py-1 border-bottom border-white"><span className="small text-dark">{item.name}</span><span className="small fw-bold text-dark">{CURRENCY}{item.price}</span></div>))}
-                        <div className="mt-2 text-end"><span className="badge bg-white border text-muted">Entry by: {e.createdBy?.split('@')[0]}</span></div>
-                     </div>
-                   )}
-                 </div>
-               )})}
-             </div>
+            <div className="card-custom p-3 mb-3 d-flex justify-content-between align-items-center bg-white">
+              <div>
+                <h5 className="m-0 text-primary-custom">Meal Sheet</h5>
+                <small className="text-muted">
+                  Manager: {currentShiftManager?.name}
+                </small>
+              </div>
+              <div className="text-end">
+                {mealSheet.find((d) => d.day === currentDay)?.requests?.[
+                  loggedInMemberId
+                ] ? (
+                  <button
+                    onClick={() => handleSelfRequest(currentDay - 1)}
+                    className="btn btn-warning btn-sm fw-bold"
+                  >
+                    Pending...
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleSelfRequest(currentDay - 1)}
+                    disabled={isRequestTimeOver}
+                    className="btn btn-outline-danger btn-sm"
+                  >
+                    Request OFF
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="card-custom overflow-hidden bg-white border-0">
+              <div className="table-responsive" style={{ maxHeight: '70vh' }}>
+                <table className="table table-hover align-middle text-center m-0">
+                  <thead
+                    className="sticky-top"
+                    style={{ background: '#F4F7FE' }}
+                  >
+                    <tr>
+                      <th className="py-3 text-muted">Day</th>
+                      {MEMBERS_CONFIG.map((m) => (
+                        <th key={m.id} className="text-dark">
+                          {m.name}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mealSheet.map((d, idx) => (
+                      <tr
+                        key={d.day}
+                        className={d.day === currentDay ? 'table-active' : ''}
+                      >
+                        <td className="fw-bold text-muted">{d.day}</td>
+                        {MEMBERS_CONFIG.map((m) => (
+                          <td
+                            key={m.id}
+                            onClick={() =>
+                              isOfficialManager &&
+                              d.day === currentDay &&
+                              !isManagerLocked &&
+                              handleManagerAction(idx, m.id)
+                            }
+                            style={{ cursor: 'pointer' }}
+                          >
+                            {d.status[m.id] ? (
+                              <span className="badge bg-success bg-opacity-10 text-success border border-success">
+                                ON
+                              </span>
+                            ) : (
+                              <span className="badge bg-danger bg-opacity-10 text-danger border border-danger">
+                                OFF
+                              </span>
+                            )}
+                            {d.day === currentDay &&
+                              d.requests?.[m.id] &&
+                              d.status[m.id] && (
+                                <div className="mt-1">
+                                  <span
+                                    className="badge bg-warning text-dark"
+                                    style={{ fontSize: '0.6rem' }}
+                                  >
+                                    Req OFF
+                                  </span>
+                                </div>
+                              )}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
 
-      </div>
+        {activeTab === 'bazaar' && (
+          <div className="animate__animated animate__fadeIn">
+            {isOfficialManager && (
+              <div className="card-custom p-3 mb-4 bg-primary bg-opacity-10 border-primary">
+                <div className="d-flex justify-content-between align-items-center">
+                  <h6 className="m-0 text-primary-custom d-flex align-items-center">
+                    <FaExchangeAlt className="me-2" /> Delegate Authority (
+                    {inputDate})
+                  </h6>
+                  {delegatedManagerId ? (
+                    <div className="d-flex align-items-center gap-2">
+                      <span className="badge bg-primary">
+                        Assigned:{' '}
+                        {
+                          MEMBERS_CONFIG.find(
+                            (m) => m.id === delegatedManagerId
+                          )?.name
+                        }
+                      </span>
+                      <button
+                        onClick={cancelDelegation}
+                        className="btn btn-sm btn-outline-danger bg-white"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="d-flex gap-2">
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: '150px' }}
+                        value={delegateToId}
+                        onChange={(e) => setDelegateToId(e.target.value)}
+                      >
+                        <option value="">Select Member</option>
+                        {MEMBERS_CONFIG.filter(
+                          (m) => m.id !== loggedInMemberId
+                        ).map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={handleDelegation}
+                        className="btn btn-sm btn-primary-custom"
+                      >
+                        Assign
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
-      {/* BOTTOM NAV */}
-      <div className="bottom-nav">
-        <button className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}><FaHome className="nav-icon" /><span>Home</span></button>
-        <button className={`nav-item ${activeTab === 'meals' ? 'active' : ''}`} onClick={() => setActiveTab('meals')}><BiDish className="nav-icon" /><span>Meals</span></button>
-        <button className={`nav-item ${activeTab === 'my_zone' ? 'active' : ''}`} onClick={() => setActiveTab('my_zone')}><FaPlus className="nav-icon" /><span>My Zone</span></button>
-        <button className={`nav-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}><FaListAlt className="nav-icon" /><span>History</span></button>
+            {hasAccess ? (
+              <div className="card-custom p-4 mb-4 border-0 bg-white shadow-sm border-top border-4 border-success">
+                <div className="d-flex justify-content-between mb-3">
+                  <h5 className="fw-bold text-success">
+                    <FaUserCheck /> Add Expense
+                  </h5>
+                  {delegatedManagerId === loggedInMemberId && (
+                    <span className="badge bg-info text-dark">
+                      You are Delegated Manager
+                    </span>
+                  )}
+                </div>
+                <form onSubmit={submitBazaar}>
+                  <div className="row g-2 mb-3">
+                    <div className="col-6">
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={inputDate}
+                        onChange={(e) => setInputDate(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="col-6">
+                      <input
+                        type="text"
+                        className="form-control bg-light"
+                        value={loggedInMemberInfo?.name}
+                        readOnly
+                      />
+                    </div>
+                  </div>
+                  {currentItems.map((item, idx) => (
+                    <div key={idx} className="d-flex gap-2 mb-2">
+                      <input
+                        placeholder="Item"
+                        className="form-control"
+                        value={item.name}
+                        onChange={(e) => {
+                          const n = [...currentItems];
+                          n[idx].name = e.target.value;
+                          setCurrentItems(n);
+                        }}
+                      />
+                      <input
+                        placeholder="Price"
+                        type="number"
+                        className="form-control"
+                        style={{ width: '100px' }}
+                        value={item.price}
+                        onChange={(e) => {
+                          const n = [...currentItems];
+                          n[idx].price = e.target.value;
+                          setCurrentItems(n);
+                        }}
+                      />
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="btn btn-sm text-primary mb-2"
+                    onClick={() =>
+                      setCurrentItems([
+                        ...currentItems,
+                        { name: '', price: '' },
+                      ])
+                    }
+                  >
+                    + Add Row
+                  </button>
+                  <button className="btn btn-primary-custom w-100">Save</button>
+                </form>
+              </div>
+            ) : (
+              <div className="alert alert-secondary text-center">
+                Permission Denied for {inputDate}
+              </div>
+            )}
+
+            <h5 className="text-dark mb-3 fw-bold">History</h5>
+            <div className="d-flex flex-column gap-3">
+              {MEMBERS_CONFIG.map((member) => {
+                const mData = bazaarList.filter(
+                  (b) => b.shopperId === member.id
+                );
+                const isOpen = expandedMemberId === member.id;
+                return (
+                  <div
+                    key={member.id}
+                    className="card-custom border-0 bg-white overflow-hidden shadow-sm"
+                  >
+                    <div
+                      className="p-3 d-flex justify-content-between align-items-center"
+                      style={{
+                        background: isOpen ? '#F4F7FE' : 'white',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() =>
+                        setExpandedMemberId(isOpen ? null : member.id)
+                      }
+                    >
+                      <div className="d-flex align-items-center gap-3">
+                        <div
+                          className="rounded-circle text-dark d-flex align-items-center justify-content-center fw-bold border"
+                          style={{
+                            width: '40px',
+                            height: '40px',
+                            background: member.gradient,
+                          }}
+                        >
+                          {member.name.charAt(0)}
+                        </div>
+                        <div>
+                          <h6 className="m-0 fw-bold text-dark">
+                            {member.name}
+                          </h6>
+                          <small className="text-muted">
+                            {mData.length} Entries
+                          </small>
+                        </div>
+                      </div>
+                      <h5 className="text-primary-custom m-0 fw-bold">
+                        ৳{mData.reduce((a, b) => a + b.subTotal, 0)}
+                      </h5>
+                    </div>
+                    {isOpen && (
+                      <div className="border-top border-light p-3 bg-light bg-opacity-25">
+                        {mData.map((b) => (
+                          <div
+                            key={b.id}
+                            className="bg-white p-3 rounded border border-light shadow-sm mb-2 position-relative"
+                          >
+                            <div className="d-flex justify-content-between border-bottom pb-1 mb-1">
+                              <span className="badge bg-dark">{b.date}</span>
+                              <span className="fw-bold">৳{b.subTotal}</span>
+                            </div>
+                            <div className="text-muted small">
+                              {b.items.map((i, x) => (
+                                <span key={x}>
+                                  {i.name} ({i.price})
+                                  {x !== b.items.length - 1 ? ', ' : ''}
+                                </span>
+                              ))}
+                            </div>
+                            {user.email === b.createdBy && (
+                              <button
+                                onClick={() => deleteBazaar(b.id)}
+                                className="btn btn-sm text-danger position-absolute top-0 end-0 p-1"
+                              >
+                                <FaTrash />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
+      <div className="bottom-nav">
+        <FaHome
+          className={`fs-4 ${
+            activeTab === 'dashboard' ? 'text-primary-custom' : 'text-muted'
+          }`}
+          onClick={() => setActiveTab('dashboard')}
+        />
+        <FaUtensils
+          className={`fs-4 ${
+            activeTab === 'meals' ? 'text-primary-custom' : 'text-muted'
+          }`}
+          onClick={() => setActiveTab('meals')}
+        />
+        <FaWallet
+          className={`fs-4 ${
+            activeTab === 'bazaar' ? 'text-primary-custom' : 'text-muted'
+          }`}
+          onClick={() => setActiveTab('bazaar')}
+        />
+      </div>
+      <ToastContainer position="top-center" theme="colored" />
     </div>
   );
 };
-
 export default Home;
