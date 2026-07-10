@@ -1,520 +1,338 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { db, auth } from '../firebase';
+import React, { useState, useMemo, useEffect } from "react";
+import { db, auth } from "../firebase";
 import {
   collection,
   addDoc,
   onSnapshot,
   doc,
   updateDoc,
-  deleteDoc,
   setDoc,
   query,
   orderBy,
-} from 'firebase/firestore';
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signOut,
-} from 'firebase/auth';
+  serverTimestamp,
+  deleteDoc,
+} from "firebase/firestore";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
   FaHome,
-  FaWallet,
-  FaTrash,
   FaUtensils,
+  FaWallet,
   FaSignOutAlt,
-  FaExclamationCircle,
-  FaChevronDown,
-  FaChevronUp,
-  FaExchangeAlt,
-  FaUserCheck,
-} from 'react-icons/fa';
-import { ToastContainer, toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+  FaCalendarAlt,
+  FaUserShield,
+  FaChartLine,
+  FaPlus,
+  FaClock,
+} from "react-icons/fa";
+import { ToastContainer, toast } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
-// --- CONFIGURATION WITH SPECIFIC GRADIENTS ---
-const APP_NAME = 'Smart Mess Pro';
-
-// আপনার পছন্দের দুটি গ্রেডিয়েন্ট
-const GRADIENT_AWAL = 'linear-gradient(135deg, #fccb90 0%, #d57eeb 100%)'; // Peach-Purple
-const GRADIENT_GUEST = 'linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)'; // Light Purple-Blue
+// --- STYLING CONSTANTS ---
+const THEME = {
+  primary: "#4F46E5", // Indigo
+  success: "#10B981", // Emerald
+  danger: "#EF4444", // Rose
+  warning: "#F59E0B", // Amber
+  bg: "#F3F4F6",
+  card: "#FFFFFF",
+};
 
 const MEMBERS_CONFIG = [
-  // বিজোড় (Odd) আইডিতে Awal এর কালার, জোড় (Even) আইডিতে Guest এর কালার দেওয়া হলো সুন্দর কম্বিনেশনের জন্য
-  { id: 1, name: 'Amit', startDay: 1, endDay: 6, gradient: GRADIENT_AWAL },
-  { id: 2, name: 'Tofayel', startDay: 7, endDay: 12, gradient: GRADIENT_GUEST },
-  { id: 3, name: 'Abid', startDay: 13, endDay: 18, gradient: GRADIENT_AWAL },
-  { id: 4, name: 'Awal', startDay: 19, endDay: 24, gradient: GRADIENT_GUEST }, // Awal (Original owner of this color/style match)
-  { id: 5, name: 'Guest', startDay: 25, endDay: 30, gradient: GRADIENT_AWAL },
+  { id: 1, name: "Amit", startDay: 1, endDay: 6, color: "#6366F1" },
+  { id: 2, name: "Tofayel", startDay: 7, endDay: 12, color: "#EC4899" },
+  { id: 3, name: "Abid", startDay: 13, endDay: 18, color: "#F59E0B" },
+  { id: 4, name: "Awal", startDay: 19, endDay: 24, color: "#10B981" },
+  { id: 5, name: "Guest", startDay: 25, endDay: 31, color: "#8B5CF6" },
 ];
 
 const MEMBER_EMAILS = {
-  'amit330@d.com': 1,
-  'tofayel330@d.com': 2,
-  'abid330@d.com': 3,
-  'awal330@d.com': 4,
-  'guest330@d.com': 5,
+  "amit330@d.com": 1,
+  "tofayel330@d.com": 2,
+  "abid330@d.com": 3,
+  "awal330@d.com": 4,
+  "guest330@d.com": 5,
 };
 
 const Home = () => {
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [authLoading, setAuthLoading] = useState(true);
-
-  // Login State
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPass, setLoginPass] = useState('');
-
-  // Date & Time Logic
-  const today = new Date();
-  const currentDay = today.getDate();
-  const currentHour = today.getHours();
-  const currentMinute = today.getMinutes();
-  const currentMonthName = today.toLocaleString('default', {
-    month: 'long',
-    year: 'numeric',
-  });
-  const daysInMonth = new Date(
-    today.getFullYear(),
-    today.getMonth() + 1,
-    0
-  ).getDate();
-
-  // 🔒 TIME LIMITS
-  const isRequestTimeOver =
-    currentHour > 18 || (currentHour === 18 && currentMinute >= 30); // 6:30 PM
-  const isManagerLocked = currentHour >= 22; // 10:00 PM (Entry Close)
-
-  // Data State
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [loading, setLoading] = useState(true);
   const [bazaarList, setBazaarList] = useState([]);
   const [mealSheet, setMealSheet] = useState([]);
-  const [delegations, setDelegations] = useState({});
-  const [loading, setLoading] = useState(true);
 
-  // UI State
-  const [expandedMemberId, setExpandedMemberId] = useState(null);
-  const [delegateToId, setDelegateToId] = useState('');
+  // Date Logic
+  const today = new Date();
+  const currentDay = today.getDate();
+  const currentMonthKey = `${today.getFullYear()}-${String(
+    today.getMonth() + 1
+  ).padStart(2, "0")}`;
 
-  // Form State
-  const [inputDate, setInputDate] = useState(today.toISOString().split('T')[0]);
-  const [currentItems, setCurrentItems] = useState([{ name: '', price: '' }]);
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (!u) setLoading(false);
+    });
+    if (user) {
+      const unsubBazaar = onSnapshot(
+        query(collection(db, "bazaar"), orderBy("timestamp", "desc")),
+        (snap) => {
+          setBazaarList(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        }
+      );
+      const unsubMeals = onSnapshot(
+        doc(db, "meals", currentMonthKey),
+        (snap) => {
+          if (snap.exists()) setMealSheet(snap.data().sheet);
+          setLoading(false);
+        }
+      );
+      return () => {
+        unsubBazaar();
+        unsubMeals();
+      };
+    }
+    return () => unsub();
+  }, [user, currentMonthKey]);
 
-  // Identity Logic
   const loggedInMemberId = useMemo(
-    () =>
-      user && MEMBER_EMAILS[user.email] ? MEMBER_EMAILS[user.email] : null,
+    () => (user ? MEMBER_EMAILS[user.email] : null),
     [user]
   );
-  const loggedInMemberInfo = useMemo(
-    () =>
-      loggedInMemberId
-        ? MEMBERS_CONFIG.find((m) => m.id === loggedInMemberId)
-        : null,
-    [loggedInMemberId]
-  );
 
-  const currentShiftManager = useMemo(() => {
+  // 📢 CURRENT MANAGER LOGIC
+  const currentManager = useMemo(() => {
     return MEMBERS_CONFIG.find(
       (m) => currentDay >= m.startDay && currentDay <= m.endDay
     );
   }, [currentDay]);
 
-  const delegatedManagerId = delegations[inputDate];
-
-  const hasAccess = useMemo(() => {
-    if (delegatedManagerId) return loggedInMemberId === delegatedManagerId;
-    return currentShiftManager?.id === loggedInMemberId; // Official manager access logic simplified for date matching in submit
-  }, [delegatedManagerId, loggedInMemberId, currentShiftManager]);
-
-  // Only allow official manager to delegate/revoke
-  const isOfficialManager = loggedInMemberId === currentShiftManager?.id;
-
-  // --- EFFECTS ---
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setAuthLoading(false);
-    });
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    if (!user) return;
-    const q = query(collection(db, 'bazaar'), orderBy('timestamp', 'desc'));
-    const unsubBazaar = onSnapshot(q, (snap) =>
-      setBazaarList(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })))
+  const stats = useMemo(() => {
+    const currentMonthBazaar = bazaarList.filter((b) =>
+      b.date.startsWith(currentMonthKey)
     );
-
-    const unsubMeals = onSnapshot(
-      doc(db, 'settings', 'mealSheet'),
-      (docSnap) => {
-        if (docSnap.exists()) {
-          setMealSheet(docSnap.data().sheet);
-        } else {
-          const sheet = Array.from({ length: daysInMonth }, (_, i) => ({
-            day: i + 1,
-            status: MEMBERS_CONFIG.reduce(
-              (acc, m) => ({ ...acc, [m.id]: true }),
-              {}
-            ),
-            requests: MEMBERS_CONFIG.reduce(
-              (acc, m) => ({ ...acc, [m.id]: false }),
-              {}
-            ),
-          }));
-          setDoc(doc(db, 'settings', 'mealSheet'), { sheet });
-        }
-      }
-    );
-
-    const unsubDelegation = onSnapshot(
-      doc(db, 'settings', 'delegations'),
-      (docSnap) => {
-        if (docSnap.exists()) setDelegations(docSnap.data());
-        else setDoc(doc(db, 'settings', 'delegations'), {});
-        setLoading(false);
-      }
-    );
-
-    return () => {
-      unsubBazaar();
-      unsubMeals();
-      unsubDelegation();
-    };
-  }, [user, daysInMonth]);
-
-  // --- ACTIONS ---
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    try {
-      await signInWithEmailAndPassword(auth, loginEmail, loginPass);
-    } catch (err) {
-      toast.error('Invalid Credentials');
-    }
-  };
-
-  const submitBazaar = async (e) => {
-    e.preventDefault();
-    if (!hasAccess) {
-      toast.error("⛔ You don't have permission for this date!");
-      return;
-    }
-    if (isManagerLocked && inputDate === today.toISOString().split('T')[0]) {
-      toast.error('⛔ Time Over!');
-      return;
-    }
-
-    const validItems = currentItems.filter((i) => i.name && i.price);
-    const subTotal = validItems.reduce(
-      (acc, curr) => acc + parseFloat(curr.price),
+    const totalCost = currentMonthBazaar.reduce(
+      (acc, b) => acc + b.subTotal,
       0
     );
+    const mStats = MEMBERS_CONFIG.map((m) => ({ ...m, meals: 0, spent: 0 }));
 
-    await addDoc(collection(db, 'bazaar'), {
-      date: inputDate,
-      shopperId: loggedInMemberId,
-      items: validItems,
-      subTotal,
-      timestamp: Date.now(),
-      createdBy: user.email,
+    currentMonthBazaar.forEach((b) => {
+      const m = mStats.find((ms) => ms.id === b.shopperId);
+      if (m) m.spent += b.subTotal;
     });
-    setCurrentItems([{ name: '', price: '' }]);
-    toast.success('Bazaar Added!');
-  };
 
-  const handleDelegation = async () => {
-    if (!delegateToId) {
-      toast.warning('Select a member first!');
-      return;
-    }
-    const newDelegations = {
-      ...delegations,
-      [inputDate]: parseInt(delegateToId),
-    };
-    await updateDoc(doc(db, 'settings', 'delegations'), newDelegations);
-    toast.success('Access Delegated Successfully');
-    setDelegateToId('');
-  };
-
-  const cancelDelegation = async () => {
-    const newDelegations = { ...delegations };
-    delete newDelegations[inputDate];
-    await setDoc(doc(db, 'settings', 'delegations'), newDelegations);
-    toast.info('Access Taken Back!');
-  };
-
-  const handleSelfRequest = async (dIdx) => {
-    const targetDay = mealSheet[dIdx].day;
-    if (targetDay !== currentDay) {
-      toast.warning('Only today!');
-      return;
-    }
-    if (isRequestTimeOver) {
-      toast.error('Time Over!');
-      return;
-    }
-    const newSheet = [...mealSheet];
-    const currentReq = newSheet[dIdx].requests[loggedInMemberId];
-    newSheet[dIdx].requests[loggedInMemberId] = !currentReq;
-    await updateDoc(doc(db, 'settings', 'mealSheet'), { sheet: newSheet });
-    toast.info('Request Updated');
-  };
-
-  const handleManagerAction = async (dIdx, memberId) => {
-    if (!isOfficialManager) {
-      toast.error('Only Official Manager can change meals!');
-      return;
-    }
-    const targetDay = mealSheet[dIdx].day;
-    if (targetDay !== currentDay) {
-      toast.error('Cannot modify past/future history!');
-      return;
-    }
-    if (isManagerLocked) {
-      toast.error('Manager time over (7:00 PM)!');
-      return;
-    }
-
-    const newSheet = [...mealSheet];
-    newSheet[dIdx].status[memberId] = !newSheet[dIdx].status[memberId];
-    if (!newSheet[dIdx].status[memberId])
-      newSheet[dIdx].requests[memberId] = false;
-    await updateDoc(doc(db, 'settings', 'mealSheet'), { sheet: newSheet });
-    toast.success('Updated');
-  };
-
-  const deleteBazaar = async (id) => {
-    if (window.confirm('Delete?')) await deleteDoc(doc(db, 'bazaar', id));
-  };
-
-  // --- CALCULATIONS ---
-  const stats = useMemo(() => {
-    let totalBazaar = 0;
-    const memberStats = MEMBERS_CONFIG.map((m) => ({
-      ...m,
-      totalMeals: 0,
-      totalCost: 0,
-      totalOffs: 0,
-    }));
-    bazaarList.forEach((e) => {
-      totalBazaar += e.subTotal;
-      const s = memberStats.find((m) => m.id === e.shopperId);
-      if (s) s.totalCost += e.subTotal;
-    });
-    let grandTotalMeals = 0;
+    let totalMeals = 0;
     mealSheet.forEach((d) => {
       MEMBERS_CONFIG.forEach((m) => {
         if (d.status[m.id]) {
-          memberStats.find((me) => me.id === m.id).totalMeals += 1;
-          grandTotalMeals += 1;
-        } else {
-          memberStats.find((me) => me.id === m.id).totalOffs += 1;
+          mStats.find((ms) => ms.id === m.id).meals++;
+          totalMeals++;
         }
       });
     });
-    const mealRate = grandTotalMeals > 0 ? totalBazaar / grandTotalMeals : 0;
-    const finalReport = memberStats.map((m) => ({
-      ...m,
-      mealCost: m.totalMeals * mealRate,
-      balance: m.totalCost - m.totalMeals * mealRate,
-    }));
-    return { totalBazaar, mealRate, finalReport };
-  }, [bazaarList, mealSheet]);
 
-  if (authLoading)
+    const mealRate = totalMeals > 0 ? totalCost / totalMeals : 0;
+    return {
+      totalCost,
+      mealRate,
+      mStats: mStats.map((m) => ({
+        ...m,
+        balance: m.spent - m.meals * mealRate,
+      })),
+    };
+  }, [bazaarList, mealSheet, currentMonthKey]);
+
+  if (loading)
     return (
-      <div className="d-flex vh-100 justify-content-center align-items-center">
-        Loading...
-      </div>
-    );
-  if (!user)
-    return (
-      <div className="d-flex vh-100 justify-content-center align-items-center bg-light px-3">
-        <div
-          className="card-custom p-5 shadow-lg"
-          style={{ maxWidth: '400px', width: '100%', background: 'white' }}
-        >
-          <h2 className="text-center text-primary-custom mb-4">{APP_NAME}</h2>
-          <form onSubmit={handleLogin}>
-            <div className="mb-3">
-              <input
-                type="email"
-                className="form-control"
-                onChange={(e) => setLoginEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div className="mb-4">
-              <input
-                type="password"
-                className="form-control"
-                onChange={(e) => setLoginPass(e.target.value)}
-                required
-              />
-            </div>
-            <button className="btn btn-primary-custom w-100">Login</button>
-          </form>
-        </div>
-        <ToastContainer position="top-center" theme="colored" />
+      <div className="d-flex flex-column vh-100 align-items-center justify-content-center bg-light">
+        <div className="spinner-grow text-primary mb-3"></div>
+        <h6 className="fw-bold text-muted">Securing your data...</h6>
       </div>
     );
 
   return (
-    <div className="dashboard-container">
-      <div className="sidebar shadow-sm">
-        <h3 className="mb-5 text-primary-custom px-2 fw-bold">{APP_NAME}</h3>
-        <div className="d-flex flex-column gap-2">
-          <button
-            className={`btn-outline-custom ${
-              activeTab === 'dashboard' ? 'active' : ''
-            }`}
-            onClick={() => setActiveTab('dashboard')}
-          >
-            {' '}
-            <FaHome className="me-3" /> Dashboard
-          </button>
-          <button
-            className={`btn-outline-custom ${
-              activeTab === 'meals' ? 'active' : ''
-            }`}
-            onClick={() => setActiveTab('meals')}
-          >
-            {' '}
-            <FaUtensils className="me-3" /> Meal Sheet
-          </button>
-          <button
-            className={`btn-outline-custom ${
-              activeTab === 'bazaar' ? 'active' : ''
-            }`}
-            onClick={() => setActiveTab('bazaar')}
-          >
-            {' '}
-            <FaWallet className="me-3" /> Bazaar History
-          </button>
+    <div
+      className="premium-app"
+      style={{ background: "#F8FAFC", minHeight: "100vh" }}
+    >
+      {/* --- DESKTOP SIDEBAR --- */}
+      <aside className="sidebar d-none d-lg-flex">
+        <div className="brand p-4">
+          <h4 className="fw-bolder text-primary mb-0">
+            SmartMess<span className="text-dark">Pro</span>
+          </h4>
         </div>
-        <div className="mt-auto p-3 bg-light rounded">
-          <span className="text-dark fw-bold small">
-            {loggedInMemberInfo?.name}
-          </span>
+        <nav className="flex-grow-1 px-3">
+          <NavItem
+            active={activeTab === "dashboard"}
+            icon={<FaChartLine />}
+            label="Dashboard"
+            onClick={() => setActiveTab("dashboard")}
+          />
+          <NavItem
+            active={activeTab === "meals"}
+            icon={<FaUtensils />}
+            label="Meal Sheet"
+            onClick={() => setActiveTab("meals")}
+          />
+          <NavItem
+            active={activeTab === "bazaar"}
+            icon={<FaWallet />}
+            label="Expenses"
+            onClick={() => setActiveTab("bazaar")}
+          />
+        </nav>
+        <div className="p-4 border-top">
+          <div className="d-flex align-items-center gap-3 mb-3">
+            <div className="avatar">
+              {MEMBERS_CONFIG.find(
+                (m) => m.id === loggedInMemberId
+              )?.name.charAt(0)}
+            </div>
+            <div className="small fw-bold">
+              {MEMBERS_CONFIG.find((m) => m.id === loggedInMemberId)?.name}
+            </div>
+          </div>
           <button
             onClick={() => signOut(auth)}
-            className="btn btn-outline-danger w-100 btn-sm mt-2"
+            className="btn btn-sm btn-outline-danger w-100 rounded-pill"
           >
             <FaSignOutAlt /> Logout
           </button>
         </div>
-      </div>
+      </aside>
 
-      <div className="main-content">
-        <div className="d-flex justify-content-between align-items-center mb-4">
-          <h2 className="m-0 fw-bold text-dark">{currentMonthName}</h2>
-          {isOfficialManager && (
-            <span className="badge bg-primary px-3 py-2">
-              👑 Official Manager
-            </span>
-          )}
+      {/* --- MAIN CONTENT --- */}
+      <main className="content-area">
+        {/* Mobile Header */}
+        <div className="mobile-header d-lg-none">
+          <h5 className="fw-bold m-0 text-primary">SmartMess</h5>
+          <button
+            onClick={() => signOut(auth)}
+            className="btn btn-link text-danger p-0"
+          >
+            <FaSignOutAlt size={20} />
+          </button>
         </div>
 
-        {activeTab === 'dashboard' && (
-          <div className="animate__animated animate__fadeIn">
-            <div className="row g-4 mb-4">
-              <div className="col-md-6">
-                <div
-                  className="card-custom p-4 text-white"
-                  style={{ background: GRADIENT_GUEST }}
-                >
-                  <small className="text-dark opacity-75 fw-bold">
-                    Meal Rate
-                  </small>
-                  <h1 className="fw-bold m-0 text-dark">
-                    ৳{stats.mealRate.toFixed(2)}
-                  </h1>
+        <div className="container py-lg-4 px-3 px-lg-5">
+          {/* --- 👑 DYNAMIC MANAGER CARD (Premium Indicator) --- */}
+          <section className="manager-banner mb-4">
+            <div className="card-premium glass-effect p-4 border-0">
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <div className="badge-live mb-2">
+                    <span className="pulse-dot"></span> Active Now
+                  </div>
+                  <h2 className="fw-bold text-white mb-1">
+                    Manager: {currentManager?.name}
+                  </h2>
+                  <p className="text-white-50 mb-0">
+                    <FaClock className="me-2" /> Duty:{" "}
+                    {currentManager?.startDay} - {currentManager?.endDay} July
+                  </p>
                 </div>
-              </div>
-              <div className="col-md-6">
-                <div
-                  className="card-custom p-4 text-white"
-                  style={{ background: GRADIENT_AWAL }}
-                >
-                  <small className="text-dark opacity-75 fw-bold">
-                    Total Cost
-                  </small>
-                  <h1 className="fw-bold m-0 text-dark">
-                    ৳{stats.totalBazaar}
-                  </h1>
-                </div>
-              </div>
-            </div>
-
-            <h5 className="text-dark mb-3 fw-bold">Member Status</h5>
-            <div className="row g-3">
-              {stats.finalReport.map((m) => (
-                <div key={m.id} className="col-12 col-md-4">
-                  <div
-                    className="card-custom p-3 border-0 text-dark"
-                    style={{ background: m.gradient }}
-                  >
-                    <div className="d-flex justify-content-between">
-                      <h5 className="m-0 fw-bold">
-                        {m.name} {loggedInMemberId === m.id && '(Me)'}
-                      </h5>
-                      <span className="badge bg-white text-dark shadow-sm">
-                        {m.balance >= 0 ? '+' : ''}
-                        {Math.abs(m.balance).toFixed(0)}
-                      </span>
-                    </div>
-                    <div className="mt-3 d-flex justify-content-between text-dark opacity-75 small fw-bold">
-                      <span>Meals: {m.totalMeals}</span>
-                      <span>Offs: {m.totalOffs}</span>
-                    </div>
+                <div className="d-none d-md-block">
+                  <div className="duty-progress">
+                    <svg viewBox="0 0 36 36" className="circular-chart">
+                      <path
+                        className="circle-bg"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                      <path
+                        className="circle"
+                        strokeDasharray={`${
+                          ((currentDay - currentManager.startDay + 1) /
+                            (currentManager.endDay -
+                              currentManager.startDay +
+                              1)) *
+                          100
+                        }, 100`}
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                    </svg>
                   </div>
                 </div>
-              ))}
+              </div>
             </div>
-          </div>
-        )}
+          </section>
 
-        {activeTab === 'meals' && (
-          <div className="animate__animated animate__fadeIn">
-            <div className="card-custom p-3 mb-3 d-flex justify-content-between align-items-center bg-white">
-              <div>
-                <h5 className="m-0 text-primary-custom">Meal Sheet</h5>
-                <small className="text-muted">
-                  Manager: {currentShiftManager?.name}
-                </small>
+          {activeTab === "dashboard" && (
+            <div className="animate-fade-in">
+              {/* Quick Stats */}
+              <div className="row g-3 mb-4">
+                <StatCard
+                  label="Meal Rate"
+                  value={`৳${stats.mealRate.toFixed(2)}`}
+                  icon={<FaChartLine />}
+                  color="#4F46E5"
+                />
+                <StatCard
+                  label="Mess Cost"
+                  value={`৳${stats.totalCost}`}
+                  icon={<FaWallet />}
+                  color="#10B981"
+                />
               </div>
-              <div className="text-end">
-                {mealSheet.find((d) => d.day === currentDay)?.requests?.[
-                  loggedInMemberId
-                ] ? (
-                  <button
-                    onClick={() => handleSelfRequest(currentDay - 1)}
-                    className="btn btn-warning btn-sm fw-bold"
-                  >
-                    Pending...
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handleSelfRequest(currentDay - 1)}
-                    disabled={isRequestTimeOver}
-                    className="btn btn-outline-danger btn-sm"
-                  >
-                    Request OFF
-                  </button>
-                )}
+
+              {/* Members Grid */}
+              <h6 className="fw-bold text-dark mb-3">Member Overview</h6>
+              <div className="row g-3">
+                {stats.mStats.map((m) => (
+                  <div key={m.id} className="col-12 col-md-6 col-xl-4">
+                    <div className="card-member shadow-sm">
+                      <div className="d-flex justify-content-between align-items-center mb-3">
+                        <div className="d-flex align-items-center gap-3">
+                          <div
+                            className="member-icon"
+                            style={{ background: m.color }}
+                          >
+                            {m.name.charAt(0)}
+                          </div>
+                          <span className="fw-bold">
+                            {m.name} {loggedInMemberId === m.id && "(You)"}
+                          </span>
+                        </div>
+                        <div
+                          className={`status-pill ${
+                            m.balance >= 0 ? "plus" : "minus"
+                          }`}
+                        >
+                          {m.balance >= 0 ? "+" : ""}
+                          {m.balance.toFixed(0)}
+                        </div>
+                      </div>
+                      <div className="d-flex justify-content-between small text-muted">
+                        <span>
+                          Meals: <b>{m.meals}</b>
+                        </span>
+                        <span>
+                          Paid: <b>৳{m.spent}</b>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-            <div className="card-custom overflow-hidden bg-white border-0">
-              <div className="table-responsive" style={{ maxHeight: '70vh' }}>
-                <table className="table table-hover align-middle text-center m-0">
-                  <thead
-                    className="sticky-top"
-                    style={{ background: '#F4F7FE' }}
-                  >
+          )}
+
+          {activeTab === "meals" && (
+            <div className="card-premium bg-white p-0 overflow-hidden shadow-sm border-0">
+              <div className="p-3 bg-light border-bottom d-flex justify-content-between align-items-center">
+                <h6 className="fw-bold m-0">Daily Meal Sheet</h6>
+                <span className="badge bg-indigo-soft text-primary">
+                  {today.toLocaleString("default", { month: "long" })}
+                </span>
+              </div>
+              <div className="table-responsive">
+                <table className="table table-hover align-middle mb-0">
+                  <thead className="bg-light">
                     <tr>
-                      <th className="py-3 text-muted">Day</th>
+                      <th className="ps-4">Day</th>
                       {MEMBERS_CONFIG.map((m) => (
-                        <th key={m.id} className="text-dark">
-                          {m.name}
+                        <th key={m.id} className="text-center">
+                          {m.name.charAt(0)}
                         </th>
                       ))}
                     </tr>
@@ -522,42 +340,19 @@ const Home = () => {
                   <tbody>
                     {mealSheet.map((d, idx) => (
                       <tr
-                        key={d.day}
-                        className={d.day === currentDay ? 'table-active' : ''}
+                        key={idx}
+                        className={
+                          d.day === currentDay ? "table-active-row" : ""
+                        }
                       >
-                        <td className="fw-bold text-muted">{d.day}</td>
+                        <td className="ps-4 fw-bold text-muted">{d.day}</td>
                         {MEMBERS_CONFIG.map((m) => (
-                          <td
-                            key={m.id}
-                            onClick={() =>
-                              isOfficialManager &&
-                              d.day === currentDay &&
-                              !isManagerLocked &&
-                              handleManagerAction(idx, m.id)
-                            }
-                            style={{ cursor: 'pointer' }}
-                          >
-                            {d.status[m.id] ? (
-                              <span className="badge bg-success bg-opacity-10 text-success border border-success">
-                                ON
-                              </span>
-                            ) : (
-                              <span className="badge bg-danger bg-opacity-10 text-danger border border-danger">
-                                OFF
-                              </span>
-                            )}
-                            {d.day === currentDay &&
-                              d.requests?.[m.id] &&
-                              d.status[m.id] && (
-                                <div className="mt-1">
-                                  <span
-                                    className="badge bg-warning text-dark"
-                                    style={{ fontSize: '0.6rem' }}
-                                  >
-                                    Req OFF
-                                  </span>
-                                </div>
-                              )}
+                          <td key={m.id} className="text-center">
+                            <div
+                              className={`meal-indicator ${
+                                d.status[m.id] ? "on" : "off"
+                              }`}
+                            ></div>
                           </td>
                         ))}
                       </tr>
@@ -566,249 +361,191 @@ const Home = () => {
                 </table>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {activeTab === 'bazaar' && (
-          <div className="animate__animated animate__fadeIn">
-            {isOfficialManager && (
-              <div className="card-custom p-3 mb-4 bg-primary bg-opacity-10 border-primary">
-                <div className="d-flex justify-content-between align-items-center">
-                  <h6 className="m-0 text-primary-custom d-flex align-items-center">
-                    <FaExchangeAlt className="me-2" /> Delegate Authority (
-                    {inputDate})
-                  </h6>
-                  {delegatedManagerId ? (
-                    <div className="d-flex align-items-center gap-2">
-                      <span className="badge bg-primary">
-                        Assigned:{' '}
-                        {
-                          MEMBERS_CONFIG.find(
-                            (m) => m.id === delegatedManagerId
-                          )?.name
-                        }
-                      </span>
-                      <button
-                        onClick={cancelDelegation}
-                        className="btn btn-sm btn-outline-danger bg-white"
-                      >
-                        Cancel
+          {activeTab === "bazaar" && (
+            <div className="row g-4">
+              <div className="col-lg-5">
+                <div
+                  className="card-premium bg-white p-4 shadow-sm border-0 sticky-lg-top"
+                  style={{ top: "20px" }}
+                >
+                  <h5 className="fw-bold mb-4">Add New Entry</h5>
+                  {loggedInMemberId === currentManager?.id ? (
+                    <form>
+                      <div className="mb-3">
+                        <label className="form-label small fw-bold">Date</label>
+                        <input
+                          type="date"
+                          className="form-control rounded-pill"
+                          defaultValue={today.toISOString().split("T")[0]}
+                        />
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label small fw-bold">
+                          Items & Prices
+                        </label>
+                        <div className="input-group mb-2">
+                          <input
+                            type="text"
+                            className="form-control"
+                            placeholder="Potato, Chicken..."
+                          />
+                          <input
+                            type="number"
+                            className="form-control"
+                            placeholder="৳"
+                            style={{ maxWidth: "80px" }}
+                          />
+                        </div>
+                      </div>
+                      <button className="btn btn-primary w-100 rounded-pill py-2 fw-bold">
+                        Save Expense
                       </button>
-                    </div>
+                    </form>
                   ) : (
-                    <div className="d-flex gap-2">
-                      <select
-                        className="form-select form-select-sm"
-                        style={{ width: '150px' }}
-                        value={delegateToId}
-                        onChange={(e) => setDelegateToId(e.target.value)}
-                      >
-                        <option value="">Select Member</option>
-                        {MEMBERS_CONFIG.filter(
-                          (m) => m.id !== loggedInMemberId
-                        ).map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={handleDelegation}
-                        className="btn btn-sm btn-primary-custom"
-                      >
-                        Assign
-                      </button>
+                    <div className="p-3 bg-light rounded-4 text-center">
+                      <FaUserShield size={30} className="text-muted mb-2" />
+                      <p className="small text-muted m-0">
+                        Only current manager <b>({currentManager?.name})</b> can
+                        add expenses.
+                      </p>
                     </div>
                   )}
                 </div>
               </div>
-            )}
-
-            {hasAccess ? (
-              <div className="card-custom p-4 mb-4 border-0 bg-white shadow-sm border-top border-4 border-success">
-                <div className="d-flex justify-content-between mb-3">
-                  <h5 className="fw-bold text-success">
-                    <FaUserCheck /> Add Expense
-                  </h5>
-                  {delegatedManagerId === loggedInMemberId && (
-                    <span className="badge bg-info text-dark">
-                      You are Delegated Manager
-                    </span>
-                  )}
-                </div>
-                <form onSubmit={submitBazaar}>
-                  <div className="row g-2 mb-3">
-                    <div className="col-6">
-                      <input
-                        type="date"
-                        className="form-control"
-                        value={inputDate}
-                        onChange={(e) => setInputDate(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="col-6">
-                      <input
-                        type="text"
-                        className="form-control bg-light"
-                        value={loggedInMemberInfo?.name}
-                        readOnly
-                      />
-                    </div>
-                  </div>
-                  {currentItems.map((item, idx) => (
-                    <div key={idx} className="d-flex gap-2 mb-2">
-                      <input
-                        placeholder="Item"
-                        className="form-control"
-                        value={item.name}
-                        onChange={(e) => {
-                          const n = [...currentItems];
-                          n[idx].name = e.target.value;
-                          setCurrentItems(n);
-                        }}
-                      />
-                      <input
-                        placeholder="Price"
-                        type="number"
-                        className="form-control"
-                        style={{ width: '100px' }}
-                        value={item.price}
-                        onChange={(e) => {
-                          const n = [...currentItems];
-                          n[idx].price = e.target.value;
-                          setCurrentItems(n);
-                        }}
-                      />
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    className="btn btn-sm text-primary mb-2"
-                    onClick={() =>
-                      setCurrentItems([
-                        ...currentItems,
-                        { name: '', price: '' },
-                      ])
-                    }
-                  >
-                    + Add Row
-                  </button>
-                  <button className="btn btn-primary-custom w-100">Save</button>
-                </form>
-              </div>
-            ) : (
-              <div className="alert alert-secondary text-center">
-                Permission Denied for {inputDate}
-              </div>
-            )}
-
-            <h5 className="text-dark mb-3 fw-bold">History</h5>
-            <div className="d-flex flex-column gap-3">
-              {MEMBERS_CONFIG.map((member) => {
-                const mData = bazaarList.filter(
-                  (b) => b.shopperId === member.id
-                );
-                const isOpen = expandedMemberId === member.id;
-                return (
+              <div className="col-lg-7">
+                <h6 className="fw-bold mb-3">Recent Transactions</h6>
+                {bazaarList.map((b) => (
                   <div
-                    key={member.id}
-                    className="card-custom border-0 bg-white overflow-hidden shadow-sm"
+                    key={b.id}
+                    className="card-premium bg-white p-3 mb-2 shadow-sm border-0 d-flex justify-content-between align-items-center"
                   >
-                    <div
-                      className="p-3 d-flex justify-content-between align-items-center"
-                      style={{
-                        background: isOpen ? '#F4F7FE' : 'white',
-                        cursor: 'pointer',
-                      }}
-                      onClick={() =>
-                        setExpandedMemberId(isOpen ? null : member.id)
-                      }
-                    >
-                      <div className="d-flex align-items-center gap-3">
-                        <div
-                          className="rounded-circle text-dark d-flex align-items-center justify-content-center fw-bold border"
-                          style={{
-                            width: '40px',
-                            height: '40px',
-                            background: member.gradient,
-                          }}
-                        >
-                          {member.name.charAt(0)}
-                        </div>
-                        <div>
-                          <h6 className="m-0 fw-bold text-dark">
-                            {member.name}
-                          </h6>
-                          <small className="text-muted">
-                            {mData.length} Entries
-                          </small>
-                        </div>
+                    <div className="d-flex align-items-center gap-3">
+                      <div className="icon-box bg-light text-primary">
+                        <FaCalendarAlt />
                       </div>
-                      <h5 className="text-primary-custom m-0 fw-bold">
-                        ৳{mData.reduce((a, b) => a + b.subTotal, 0)}
-                      </h5>
+                      <div>
+                        <div className="fw-bold">
+                          {
+                            MEMBERS_CONFIG.find((m) => m.id === b.shopperId)
+                              ?.name
+                          }
+                        </div>
+                        <small className="text-muted">{b.date}</small>
+                      </div>
                     </div>
-                    {isOpen && (
-                      <div className="border-top border-light p-3 bg-light bg-opacity-25">
-                        {mData.map((b) => (
-                          <div
-                            key={b.id}
-                            className="bg-white p-3 rounded border border-light shadow-sm mb-2 position-relative"
-                          >
-                            <div className="d-flex justify-content-between border-bottom pb-1 mb-1">
-                              <span className="badge bg-dark">{b.date}</span>
-                              <span className="fw-bold">৳{b.subTotal}</span>
-                            </div>
-                            <div className="text-muted small">
-                              {b.items.map((i, x) => (
-                                <span key={x}>
-                                  {i.name} ({i.price})
-                                  {x !== b.items.length - 1 ? ', ' : ''}
-                                </span>
-                              ))}
-                            </div>
-                            {user.email === b.createdBy && (
-                              <button
-                                onClick={() => deleteBazaar(b.id)}
-                                className="btn btn-sm text-danger position-absolute top-0 end-0 p-1"
-                              >
-                                <FaTrash />
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                    <div className="text-end">
+                      <div className="fw-bold text-dark">৳{b.subTotal}</div>
+                      <div
+                        className="small text-muted"
+                        style={{ fontSize: "10px" }}
+                      >
+                        {b.items.map((i) => i.name).join(", ")}
                       </div>
-                    )}
+                    </div>
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-      </div>
-      <div className="bottom-nav">
-        <FaHome
-          className={`fs-4 ${
-            activeTab === 'dashboard' ? 'text-primary-custom' : 'text-muted'
-          }`}
-          onClick={() => setActiveTab('dashboard')}
+          )}
+        </div>
+      </main>
+
+      {/* --- MOBILE BOTTOM NAV --- */}
+      <nav className="mobile-nav d-lg-none">
+        <NavIcon
+          active={activeTab === "dashboard"}
+          icon={<FaHome />}
+          label="Home"
+          onClick={() => setActiveTab("dashboard")}
         />
-        <FaUtensils
-          className={`fs-4 ${
-            activeTab === 'meals' ? 'text-primary-custom' : 'text-muted'
-          }`}
-          onClick={() => setActiveTab('meals')}
+        <NavIcon
+          active={activeTab === "meals"}
+          icon={<FaUtensils />}
+          label="Meals"
+          onClick={() => setActiveTab("meals")}
         />
-        <FaWallet
-          className={`fs-4 ${
-            activeTab === 'bazaar' ? 'text-primary-custom' : 'text-muted'
-          }`}
-          onClick={() => setActiveTab('bazaar')}
+        <NavIcon
+          active={activeTab === "bazaar"}
+          icon={<FaWallet />}
+          label="History"
+          onClick={() => setActiveTab("bazaar")}
         />
-      </div>
+      </nav>
+
       <ToastContainer position="top-center" theme="colored" />
+
+      {/* --- INLINE PREMIUM CSS --- */}
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+        :root { --p: #4F46E5; }
+        .premium-app { font-family: 'Inter', sans-serif; display: flex; }
+        .sidebar { width: 260px; height: 100vh; background: #fff; position: sticky; top: 0; flex-direction: column; border-right: 1px solid #E5E7EB; }
+        .content-area { flex-grow: 1; padding-bottom: 80px; }
+        .card-premium { border-radius: 24px; }
+        .glass-effect { background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%); color: white; box-shadow: 0 20px 25px -5px rgba(79, 70, 229, 0.2); }
+        .badge-live { display: inline-flex; align-items: center; background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: bold; letter-spacing: 1px; }
+        .pulse-dot { width: 8px; height: 8px; background: #10B981; border-radius: 50%; margin-right: 8px; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.5; } 100% { transform: scale(1); opacity: 1; } }
+        .stat-card { background: white; padding: 20px; border-radius: 20px; border: none; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+        .card-member { background: white; padding: 16px; border-radius: 20px; transition: 0.3s; }
+        .card-member:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+        .member-icon { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; }
+        .status-pill { padding: 4px 12px; border-radius: 10px; font-weight: bold; font-size: 13px; }
+        .status-pill.plus { background: #D1FAE5; color: #065F46; }
+        .status-pill.minus { background: #FEE2E2; color: #991B1B; }
+        .mobile-header { background: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; position: sticky; top:0; z-index: 100; }
+        .mobile-nav { position: fixed; bottom: 0; width: 100%; background: white; display: flex; justify-content: space-around; padding: 10px; border-top: 1px solid #eee; box-shadow: 0 -5px 15px rgba(0,0,0,0.05); z-index: 1000; }
+        .nav-item-custom { display: flex; align-items: center; gap: 12px; padding: 12px 15px; border-radius: 12px; cursor: pointer; transition: 0.2s; color: #6B7280; font-weight: 500; }
+        .nav-item-custom.active { background: #EEF2FF; color: #4F46E5; }
+        .meal-indicator { width: 12px; height: 12px; border-radius: 50%; margin: auto; }
+        .meal-indicator.on { background: #10B981; box-shadow: 0 0 8px #10B981; }
+        .meal-indicator.off { background: #EF4444; }
+        .table-active-row { background: #F5F7FF !important; }
+        .avatar { width: 35px; height: 35px; background: #4F46E5; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+        .circular-chart { display: block; margin: 10px auto; max-width: 60px; max-height: 60px; }
+        .circle-bg { fill: none; stroke: rgba(255,255,255,0.2); stroke-width: 3.8; }
+        .circle { fill: none; stroke-width: 2.8; stroke-linecap: round; stroke: white; animation: progress 1s ease-out forwards; }
+        @keyframes progress { 0% { stroke-dasharray: 0 100; } }
+      `,
+        }}
+      />
     </div>
   );
 };
+
+// --- Sub-Components for Clean Code ---
+const NavItem = ({ icon, label, active, onClick }) => (
+  <div
+    onClick={onClick}
+    className={`nav-item-custom mb-1 ${active ? "active" : ""}`}
+  >
+    {icon} {label}
+  </div>
+);
+
+const NavIcon = ({ icon, label, active, onClick }) => (
+  <div
+    onClick={onClick}
+    className={`text-center ${active ? "text-primary" : "text-muted"}`}
+  >
+    <div style={{ fontSize: "20px" }}>{icon}</div>
+    <div style={{ fontSize: "10px", fontWeight: "bold" }}>{label}</div>
+  </div>
+);
+
+const StatCard = ({ label, value, icon, color }) => (
+  <div className="col-6">
+    <div className="stat-card">
+      <div className="d-flex justify-content-between align-items-start mb-2">
+        <div className="small fw-bold text-muted">{label}</div>
+        <div style={{ color }}>{icon}</div>
+      </div>
+      <h4 className="fw-bold m-0">{value}</h4>
+    </div>
+  </div>
+);
+
 export default Home;
